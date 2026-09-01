@@ -9,7 +9,7 @@ from .coordinate_contract import (
 )
 from .inspection_plan import InspectionPlan, PosePlanningInput, PoseTarget
 from .pose_planner import PosePlanner
-from .structured_light_adapter import StructuredLightAdapter, StructuredLightLoadError
+from .structured_light_adapter import StructuredLightAdapter, StructuredLightLoadError, UnsupportedPLYFormatError
 
 __all__ = [
     "CloudType",
@@ -23,4 +23,5 @@ __all__ = [
     "PosePlanner",
     "StructuredLightAdapter",
     "StructuredLightLoadError",
+    "UnsupportedPLYFormatError",
 ]

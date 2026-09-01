@@ -23,6 +23,8 @@ class CoordinateConvention:
     origin_description: str
     image_width: int | None = None
     image_height: int | None = None
+    z_scale: float | None = None
+    z_sign: float | None = None
 
 
 @dataclass(frozen=True)
@@ -68,8 +70,8 @@ DEFAULT_COORDINATE_CONVENTION = CoordinateConvention(
     x_axis="image-centered horizontal axis, derived from pixel column relative to image center",
     y_axis="image-centered vertical axis, derived from pixel row relative to image center",
     z_axis="relative phase-derived height; not guaranteed to be calibrated mm unless proven in the external pipeline",
-    xy_unit="pixel-relative",
-    z_unit="relative_phase_scale",
+    xy_unit="pixel",
+    z_unit="phase_relative",
     origin_description="image center / structured-light reconstruction center",
     image_width=None,
     image_height=None,

@@ -18,7 +18,7 @@ class PlatformController(Protocol):
     def get_telemetry(self) -> PlatformTelemetry:
         ...
 
-    def wait_until_reached(self, timeout: float) -> PlatformTelemetry:
+    def wait_until_stable(self, timeout: float) -> PlatformTelemetry:
         ...
 
 
@@ -31,5 +31,5 @@ class PlatformControllerProtocol(PlatformController):
     def get_telemetry(self) -> PlatformTelemetry:
         raise NotImplementedError
 
-    def wait_until_reached(self, timeout: float) -> PlatformTelemetry:
+    def wait_until_stable(self, timeout: float) -> PlatformTelemetry:
         raise NotImplementedError

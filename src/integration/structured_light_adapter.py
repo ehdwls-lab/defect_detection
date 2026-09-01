@@ -26,6 +26,10 @@ class UnsupportedCloudTypeError(StructuredLightLoadError):
     """Raised when the cloud type cannot be confidently classified."""
 
 
+class UnsupportedPLYFormatError(StructuredLightLoadError):
+    """Raised for PLY encodings not supported by this Phase 2 adapter."""
+
+
 class StructuredLightAdapter:
     """Normalize external structured-light outputs into a stable defect-detection contract.
 
@@ -39,11 +43,17 @@ class StructuredLightAdapter:
         if not run_dir.exists():
             raise StructuredLightLoadError(f"Structured-light directory does not exist: {run_dir}")
 
-        candidate_ply = StructuredLightAdapter._find_latest_ply(run_dir)
+        artifacts = StructuredLightAdapter.discover_artifacts(run_dir)
+        candidate_ply = StructuredLightAdapter.select_artifact(artifacts)
         if candidate_ply is None:
             raise PLYReadError(f"No final PLY found in structured-light run directory: {run_dir}")
 
-        return StructuredLightAdapter.from_ply(candidate_ply, run_id=run_dir.name, paths=paths)
+        result = StructuredLightAdapter.from_ply(candidate_ply, run_id=run_dir.name, paths=paths)
+        result.metadata["available_artifacts"] = [
+            {"path": str(path), "cloud_type": cloud_type.value}
+            for path, cloud_type in artifacts
+        ]
+        return result
 
     @staticmethod
     def from_ply(
@@ -56,7 +66,7 @@ class StructuredLightAdapter:
         if not ply.exists():
             raise PLYReadError(f"PLY file does not exist: {ply}")
 
-        metadata = StructuredLightAdapter._read_ply_header(ply)
+        metadata = StructuredLightAdapter.parse_ply_header(ply)
         cloud_type = StructuredLightAdapter._infer_cloud_type(ply, metadata)
         coordinate = StructuredLightAdapter._coordinate_convention(ply, metadata)
 
@@ -100,59 +110,101 @@ class StructuredLightAdapter:
         )
 
     @staticmethod
-    def _find_latest_ply(run_dir: Path) -> Path | None:
-        candidates = sorted(run_dir.rglob("*.ply"), key=lambda p: p.stat().st_mtime, reverse=True)
-        return candidates[0] if candidates else None
+    def discover_artifacts(run_dir: str | Path) -> list[tuple[Path, CloudType]]:
+        root = Path(run_dir)
+        return [
+            (path, StructuredLightAdapter._infer_cloud_type(path, {}))
+            for path in sorted(root.rglob("*.ply"))
+        ]
 
     @staticmethod
-    def _read_ply_header(ply_path: Path) -> dict[str, Any]:
+    def select_artifact(artifacts: list[tuple[Path, CloudType]], preferred: CloudType = CloudType.OBJECT_ONLY) -> Path | None:
+        priorities = {
+            CloudType.OBJECT_ONLY: 0,
+            CloudType.OBJECT_AND_PLATFORM: 1,
+            CloudType.OBJECT_PLATFORM_FLOOR: 2,
+            CloudType.UNKNOWN: 3,
+        }
+        matches = [item for item in artifacts if item[1] is preferred]
+        if matches:
+            return sorted(matches, key=lambda item: (priorities[item[1]], item[0].name))[0][0]
+        known = [item for item in artifacts if item[1] is not CloudType.UNKNOWN]
+        if not known:
+            return None
+        return sorted(known, key=lambda item: (priorities[item[1]], item[0].name))[0][0]
+
+    @staticmethod
+    def parse_ply_header(ply_path: str | Path) -> dict[str, Any]:
+        ply_path = Path(ply_path)
         try:
             with ply_path.open("r", encoding="ascii") as handle:
-                lines = handle.readlines()
-        except OSError as exc:
+                lines = []
+                for _ in range(256):
+                    line = handle.readline()
+                    if not line:
+                        break
+                    lines.append(line)
+                    if line.strip() == "end_header":
+                        break
+        except (OSError, UnicodeDecodeError) as exc:
             raise PLYReadError(f"Failed to read PLY header: {ply_path}") from exc
 
         vertex_count = 0
         has_color = False
         has_normals = False
         seen_end_header = False
+        ply_format = None
+        properties: set[str] = set()
 
         for line in lines:
             stripped = line.strip()
+            if stripped.startswith("format "):
+                parts = stripped.split()
+                ply_format = parts[1] if len(parts) >= 2 else None
             if stripped.startswith("element vertex"):
                 try:
                     vertex_count = int(stripped.split()[-1])
                 except ValueError:
                     vertex_count = 0
-            if stripped.startswith("property uchar red"):
-                has_color = True
-            if stripped.startswith("property float nx") or stripped.startswith("property float nx"):
-                has_normals = True
+            if stripped.startswith("property "):
+                properties.add(stripped.split()[-1])
             if stripped == "end_header":
                 seen_end_header = True
                 break
 
         if not seen_end_header:
             raise PLYReadError(f"PLY header missing end_header marker: {ply_path}")
+        if ply_format != "ascii":
+            raise UnsupportedPLYFormatError(f"Only ASCII PLY is supported, got {ply_format!r}: {ply_path}")
+
+        required_xyz = {"x", "y", "z"}
+        if not required_xyz.issubset(properties):
+            raise PLYReadError(f"PLY vertex properties must contain x/y/z: {ply_path}")
+        has_color = {"red", "green", "blue"}.issubset(properties)
+        has_normals = {"nx", "ny", "nz"}.issubset(properties)
 
         return {
             "vertex_count": vertex_count,
             "has_color": has_color,
             "has_normals": has_normals,
+            "format": ply_format,
+            "properties": sorted(properties),
         }
 
     @staticmethod
     def _infer_cloud_type(ply_path: Path, metadata: dict[str, Any]) -> CloudType:
         name = ply_path.name.lower()
-        if "with_floor" in name:
+        if "with_floor" in name or "바닥" in name:
             return CloudType.OBJECT_PLATFORM_FLOOR
-        if "platform" in name or "floor" in name:
+        if "물체+플랫폼" in name or "object+platform" in name or "object_and_platform" in name:
             return CloudType.OBJECT_AND_PLATFORM
-        if "final" in name or "object" in name:
+        if "물체만" in name or "object_only" in name:
             return CloudType.OBJECT_ONLY
-        if metadata.get("vertex_count", 0) <= 0:
-            return CloudType.UNKNOWN
-        return CloudType.OBJECT_ONLY
+        if name.startswith("final_dc_mask_phase") and "with_floor" not in name:
+            return CloudType.OBJECT_ONLY
+        # Segmented output is a visualization/analysis artifact. Its content
+        # type is not inferred without an explicit manifest.
+        return CloudType.UNKNOWN
 
     @staticmethod
     def _coordinate_convention(ply_path: Path, metadata: dict[str, Any]) -> CoordinateConvention:
@@ -162,11 +214,13 @@ class StructuredLightAdapter:
             x_axis="image-centered x coordinate, relative to the reconstructed image center",
             y_axis="image-centered y coordinate, relative to the reconstructed image center",
             z_axis="relative phase-derived height, not guaranteed to be calibrated mm",
-            xy_unit="pixel-relative",
-            z_unit="relative_phase_scale",
+            xy_unit="pixel",
+            z_unit="phase_relative",
             origin_description="image center / structured-light reconstruction center",
             image_width=None,
             image_height=None,
+            z_scale=None,
+            z_sign=None,
         )
 
     @staticmethod

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Protocol
 
 from .z_search_types import BestZResult, InspectionQualitySample
@@ -11,11 +12,7 @@ class ZSearchController(Protocol):
 
 
 class AutomaticZSearch:
-    """Thin interface skeleton for automatic Z search.
-
-    This does not contain a hardware serial implementation or an arbitrary
-    heuristic. It defines the interface and expected return contract only.
-    """
+    """Pure candidate selector; movement and image capture stay outside it."""
 
     def __init__(self, *, start_z_cm: float = 18.0, end_z_cm: float = 30.0, step_z_cm: float = 0.5) -> None:
         self.start_z_cm = float(start_z_cm)
@@ -50,5 +47,32 @@ class AutomaticZSearch:
             best_quality=None,
             samples=(sample,),
             failure_reason="Automatic Z Search not implemented yet; interface contract only.",
+            pose_id=pose_id,
+        )
+
+    @staticmethod
+    def select_best(*, pose_id: str, samples: Iterable[InspectionQualitySample]) -> BestZResult:
+        history = tuple(samples)
+        valid = [
+            sample for sample in history
+            if sample.gate_passed and sample.quality_score is not None
+        ]
+        if not valid:
+            return BestZResult(
+                success=False,
+                best_z_cm=None,
+                best_quality=None,
+                samples=history,
+                failure_reason="NoValidInspectionZ",
+                pose_id=pose_id,
+            )
+        # Stable tie rule: prefer the lower Z, independent of input ordering.
+        best = max(valid, key=lambda sample: (float(sample.quality_score), -sample.z_cm))
+        return BestZResult(
+            success=True,
+            best_z_cm=best.z_cm,
+            best_quality=best,
+            samples=history,
+            failure_reason=None,
             pose_id=pose_id,
         )
