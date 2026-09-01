@@ -58,6 +58,13 @@ from structured_light_paths import (
     REFERENCE_4PHASE_DIR,
     ROOT,
 )
+from structured_light_projector import (
+    color_pattern as 공통_색상패턴_생성,
+    pattern_coordinates as 공통_패턴_좌표_생성,
+    select_projector_monitor,
+    sine_brightness as 공통_사인파_밝기_생성,
+    xrandr_monitors,
+)
 
 
 기본_저장_루트 = PREPROCESS_ROOT
@@ -200,36 +207,7 @@ def 공통_카메라값_불러오기(path, 기본_게인, 기본_흰색보정):
 
 
 def xrandr_모니터_목록():
-    try:
-        result = subprocess.run(
-            ["xrandr", "--query"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except Exception:
-        return []
-
-    pattern = re.compile(
-        r"^(?P<name>\S+)\s+connected(?:\s+primary)?\s+"
-        r"(?P<w>\d+)x(?P<h>\d+)\+(?P<x>-?\d+)\+(?P<y>-?\d+)"
-    )
-
-    monitors = []
-    for line in result.stdout.splitlines():
-        match = pattern.search(line)
-        if match:
-            monitors.append(
-                {
-                    "name": match.group("name"),
-                    "w": int(match.group("w")),
-                    "h": int(match.group("h")),
-                    "x": int(match.group("x")),
-                    "y": int(match.group("y")),
-                    "primary": " primary " in f" {line} ",
-                }
-            )
-    return monitors
+    return xrandr_monitors()
 
 
 def 프로젝터_화면_선택(args):
@@ -249,28 +227,7 @@ def 프로젝터_화면_선택(args):
             )
     구분선()
 
-    selected = None
-
-    if args.monitor != "auto":
-        selected = next(
-            (monitor for monitor in monitors if monitor["name"] == args.monitor),
-            None,
-        )
-    else:
-        selected = next(
-            (
-                monitor
-                for monitor in monitors
-                if "HDMI" in monitor["name"].upper()
-            ),
-            None,
-        )
-
-        if selected is None:
-            selected = next(
-                (monitor for monitor in monitors if not monitor["primary"]),
-                None,
-            )
+    selected = select_projector_monitor(monitors, args.monitor)
 
     if selected is None:
         selected = {
@@ -1534,41 +1491,15 @@ def 카메라_열기(args, settings):
 
 
 def 패턴_좌표_생성(width, height, direction):
-    if direction == "vertical":
-        return np.tile(
-            np.arange(width, dtype=np.float32),
-            (height, 1),
-        )
-
-    return np.tile(
-        np.arange(height, dtype=np.float32).reshape(height, 1),
-        (1, width),
-    )
+    return 공통_패턴_좌표_생성(width, height, direction)
 
 
 def 사인파_밝기_생성(coord, period, base, amplitude, phase):
-    pattern = base + amplitude * np.cos(
-        2.0 * np.pi * coord / float(period) + phase
-    )
-    return np.clip(pattern, 0, 255).astype(np.uint8)
+    return 공통_사인파_밝기_생성(coord, period, base, amplitude, phase)
 
 
 def 색상패턴_생성(gray_pattern, color_name):
-    zeros = np.zeros_like(gray_pattern)
-
-    if color_name == "white":
-        return cv2.merge([gray_pattern, gray_pattern, gray_pattern])
-
-    if color_name == "green":
-        return cv2.merge([zeros, gray_pattern, zeros])
-
-    if color_name == "red":
-        return cv2.merge([zeros, zeros, gray_pattern])
-
-    if color_name == "blue":
-        return cv2.merge([gray_pattern, zeros, zeros])
-
-    raise ValueError(f"지원하지 않는 색상입니다: {color_name}")
+    return 공통_색상패턴_생성(gray_pattern, color_name)
 
 
 def 프로젝터_창_준비(monitor):

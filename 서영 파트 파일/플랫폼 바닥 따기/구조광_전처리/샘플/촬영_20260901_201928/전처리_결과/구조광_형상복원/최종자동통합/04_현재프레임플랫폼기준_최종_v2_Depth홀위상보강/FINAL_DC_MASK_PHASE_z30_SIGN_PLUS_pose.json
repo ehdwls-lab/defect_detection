@@ -1,0 +1,83 @@
+{
+  "schema_version": "structured_light_pose_v1",
+  "input_ply": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플/촬영_20260901_201928/전처리_결과/구조광_형상복원/최종자동통합/04_현재프레임플랫폼기준_최종_v2_Depth홀위상보강/FINAL_DC_MASK_PHASE_z30_SIGN_PLUS.ply",
+  "segmented_ply": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플/촬영_20260901_201928/전처리_결과/구조광_형상복원/최종자동통합/04_현재프레임플랫폼기준_최종_v2_Depth홀위상보강/FINAL_DC_MASK_PHASE_z30_SIGN_PLUS_dominant_plane_segmented.ply",
+  "coordinate_contract": {
+    "xy_unit": "pixel",
+    "z_unit": "phase_relative",
+    "metric_z": false
+  },
+  "planes": [
+    {
+      "plane_name": "Shot 1",
+      "dominant": true,
+      "points_count": 22609,
+      "pitch_deg": 6.438477568905146,
+      "roll_deg": -6.825644492383595,
+      "raw_pitch_deg": 6.438477568905146,
+      "raw_roll_deg": -6.825644492383595,
+      "legacy_relative_z": {
+        "value_cm": 20.0,
+        "metric": false,
+        "stm_compatible": false
+      }
+    },
+    {
+      "plane_name": "Shot 2",
+      "dominant": false,
+      "points_count": 1826,
+      "pitch_deg": 14.050464689948285,
+      "roll_deg": 22.5,
+      "raw_pitch_deg": 14.050464689948285,
+      "raw_roll_deg": 41.41071995077012,
+      "legacy_relative_z": {
+        "value_cm": 20.0,
+        "metric": false,
+        "stm_compatible": false
+      }
+    },
+    {
+      "plane_name": "Shot 3",
+      "dominant": false,
+      "points_count": 1493,
+      "pitch_deg": -3.18662686839388,
+      "roll_deg": -8.146617014545534,
+      "raw_pitch_deg": -3.18662686839388,
+      "raw_roll_deg": -8.146617014545534,
+      "legacy_relative_z": {
+        "value_cm": 20.0,
+        "metric": false,
+        "stm_compatible": false
+      }
+    },
+    {
+      "plane_name": "Shot 4",
+      "dominant": false,
+      "points_count": 1344,
+      "pitch_deg": -2.5302373205791255,
+      "roll_deg": 22.5,
+      "raw_pitch_deg": -2.5302373205791255,
+      "raw_roll_deg": 79.41116065461533,
+      "legacy_relative_z": {
+        "value_cm": 20.0,
+        "metric": false,
+        "stm_compatible": false
+      }
+    },
+    {
+      "plane_name": "Shot 5",
+      "dominant": false,
+      "points_count": 1257,
+      "pitch_deg": -5.3888546109877655,
+      "roll_deg": -6.442993363891997,
+      "raw_pitch_deg": -5.3888546109877655,
+      "raw_roll_deg": -6.442993363891997,
+      "legacy_relative_z": {
+        "value_cm": 20.0,
+        "metric": false,
+        "stm_compatible": false
+      }
+    }
+  ],
+  "stm_z_command_allowed": false
+}

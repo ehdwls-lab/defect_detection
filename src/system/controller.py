@@ -67,6 +67,12 @@ class SystemController:
             plan = self.pose_planner.plan(structured)
             plan.validate()
 
+            # A production pose JSON can currently supply roll/pitch for planning
+            # diagnostics only. Do not let the generic workflow invent a safe Z,
+            # send a platform pose, or enter automatic Z search for that plan.
+            if plan.metadata.get("platform_motion_allowed") is False:
+                raise RuntimeError("Inspection plan is planning-only; platform motion is disabled")
+
             for pose in plan.poses:
                 self.logger.info("[POSE] %s source=%s", pose.pose_id, pose.source)
                 self._transition(SystemState.MOVE_SAFE_POSE)

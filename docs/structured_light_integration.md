@@ -65,6 +65,24 @@ Before calibration the expected status is `CALIBRATION_REQUIRED`, with
 when launched through `ShellStructuredLightRunner`; manual shell execution retains the placement
 prompt. CloudCompare is off unless `STRUCTURED_LIGHT_VISUALIZE=1` is set.
 
+## Projector-only diagnostic
+
+Before changing exposure or phase thresholds, validate the PC-to-projector path without opening
+the Orbbec camera:
+
+```bash
+.venv/bin/python src/tools/test_structured_light_projector.py
+```
+
+Keys `1/2/3` show black, white, and 50% gray; `4/5/6/7` show the exact production
+0/90/180/270 phase arrays; `8` repeats the production sequence; `9` shows the coverage screen.
+Press `Q` or `ESC` to quit. The four production arrays are also saved under
+`/tmp/projector_test`. GUI-free numeric verification is available with `--array-only`.
+
+The shared generator preserves `direction=horizontal`, `period=80`, `base=128`, and
+`amplitude=127`. In the inherited naming convention, `horizontal` varies by image row and
+therefore produces horizontal bands. Do not change this direction merely to match a visual label.
+
 ### Integration Adapter
 
 Responsibilities:

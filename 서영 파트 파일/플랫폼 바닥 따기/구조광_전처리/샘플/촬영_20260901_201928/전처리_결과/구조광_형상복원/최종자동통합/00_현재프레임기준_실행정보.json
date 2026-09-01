@@ -1,0 +1,13 @@
+{
+  "final_method": "same-frame platform reference + phase-validated Depth internal-hole refinement",
+  "external_reference_used": false,
+  "reference_dir_argument_ignored_for_final_shape": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/현재배치_기준데이터/active/E480_G16/Reference_4위상",
+  "depth_exposure": 1999,
+  "depth_gain": 64,
+  "background_depth": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/현재배치_기준데이터/active/E1999_G64/플랫폼_바닥_depth.npy",
+  "direction": "horizontal",
+  "period": 80,
+  "base": 128.0,
+  "amplitude": 127.0,
+  "note": "G/E fusion까지는 기존 코드 그대로. 외부 Reference/HDR/QG 후단만 현재 프레임 플랫폼 기준으로 교체."
+}

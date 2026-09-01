@@ -1,0 +1,109 @@
+{
+  "method": "same-frame platform phase field; no external empty-platform Reference phase subtraction",
+  "depth_object_mask_source": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플/촬영_20260901_201928/00_Depth자동영역/03_Depth_물체픽셀_확인용.png",
+  "depth_mask_role": "seed/silhouette only; internal holes are phase-validated",
+  "depth_seed_pixels": 85482,
+  "depth_hole_phase_refinement": {
+    "used_external_contours": 1,
+    "platform_residual_p50_abs_rad": 0.1336099844041546,
+    "platform_residual_p90_abs_rad": 0.2440612517999105,
+    "platform_residual_p95_abs_rad": 0.27219638750237446,
+    "phase_threshold_rad": 0.65,
+    "hole_candidate_pixels": 44310,
+    "filled_pixels": 44310,
+    "depth_seed_pixels": 85482,
+    "refined_object_pixels": 129792,
+    "hole_components": [
+      {
+        "label": 1,
+        "pixels": 44310,
+        "p25_abs_rad": 2.098844679236194,
+        "median_abs_rad": 2.351751580775052,
+        "p90_abs_rad": 2.957649168166686,
+        "strong_ratio": 1.0,
+        "filled_as_object": true
+      }
+    ]
+  },
+  "domain_pixels": 191527,
+  "object_pixels_after_hole_refinement": 129792,
+  "object_solved_pixels": 129740,
+  "platform_pixels": 61735,
+  "platform_fit_pixels": 35618,
+  "platform_exclude_dilate_px": 15,
+  "platform_qg_components": [
+    {
+      "label": 1,
+      "pixels": 35618,
+      "solved": 35618,
+      "seed_y": 442,
+      "seed_x": 860
+    }
+  ],
+  "platform_model": {
+    "model": "robust quadratic c0+c1*x+c2*y+c3*x2+c4*xy+c5*y2",
+    "coeff_normalized": [
+      2.6314847729821116,
+      2.6985680579227065,
+      -55.48632532927606,
+      -0.4250326542897478,
+      -1.2553222758289277,
+      0.6336568577893114
+    ],
+    "candidate_pixels": 35618,
+    "inlier_pixels": 35615,
+    "inlier_percent": 99.99157729238026,
+    "robust_threshold_rad": 0.6905994691513904,
+    "platform_residual_median_rad": 0.00630347858206548,
+    "platform_residual_mad_rad": 0.13308842556168266,
+    "platform_residual_p90_abs_rad": 0.24406125179991028
+  },
+  "platform_same_frame_residual_p90_abs_rad": 0.2440612517999105,
+  "object_qg_components": [
+    {
+      "label": 2,
+      "pixels": 129746,
+      "solved": 129740,
+      "seed_y": 440,
+      "seed_x": 485
+    }
+  ],
+  "object_global_shifts": [
+    {
+      "shift": 0,
+      "negative_ratio": 0.011122244488977955,
+      "p1": -0.17123098807534398,
+      "p5": 0.5497893371583724,
+      "p50": 2.0713965244220507,
+      "p95": 3.657592581157192,
+      "p99": 3.954778757788929,
+      "component_label": 2,
+      "pixels": 129740
+    }
+  ],
+  "object_relative_stats": {
+    "p1_rad": -0.16898376956582067,
+    "p5_rad": 0.5537910789251328,
+    "median_rad": 2.0713963508605957,
+    "p95_rad": 3.6562224388122555,
+    "p99_rad": 3.953325295448303,
+    "range_p5_p95_rad": 3.102431359887123
+  },
+  "spike_pixels_corrected": 120,
+  "height_color": {
+    "low_rad": -0.004994347896426905,
+    "high_rad": 3.878112683296204,
+    "platform_color": "fixed light gray"
+  },
+  "ply": {
+    "actual_mm": false,
+    "z_formula": "-1.0 * relative_phase * 40.0",
+    "raw": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플/촬영_20260901_201928/전처리_결과/구조광_형상복원/최종자동통합/04_현재프레임플랫폼기준_최종_v2_Depth홀위상보강/01_v2_현재프레임기준_RAW_물체+플랫폼.ply",
+    "final": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플/촬영_20260901_201928/전처리_결과/구조광_형상복원/최종자동통합/04_현재프레임플랫폼기준_최종_v2_Depth홀위상보강/02_v2_현재프레임기준_최종_물체+플랫폼.ply",
+    "object_only": "/home/dongjin/defect_detection/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플/촬영_20260901_201928/전처리_결과/구조광_형상복원/최종자동통합/04_현재프레임플랫폼기준_최종_v2_Depth홀위상보강/03_v2_현재프레임기준_최종_물체만.ply",
+    "raw_points": 47848,
+    "final_points": 47848,
+    "object_points": 32449
+  },
+  "important": "외부 Reference phase는 최종 상대형상 계산에 사용하지 않았다. Depth 실제 물체 픽셀은 최종 경계가 아니라 seed/silhouette로만 사용했다. Depth 외곽 내부의 hole은 같은 프레임 플랫폼 phase와 비교해 플랫폼과 확실히 다른 hole만 물체로 복구했다. 현재 물체 촬영 프레임에서 보이는 플랫폼만으로 carrier/reference phase field를 만들고, 플랫폼과 물체를 분리한 상태로 물체에서만 local QG unwrap을 수행했다. Z는 기존 프로젝트와 같은 상대위상 시각화값이며 실제 mm가 아니다."
+}

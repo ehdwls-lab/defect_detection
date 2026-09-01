@@ -69,7 +69,7 @@ class ShellStructuredLightConfig:
 
 class ShellStructuredLightRunner:
     REQUIRED_SOURCES = (
-        "물체검사.sh", "structured_light_paths.py",
+        "물체검사.sh", "structured_light_paths.py", "structured_light_projector.py",
         "구조광_전처리_최종_v2_현재프레임플랫폼기준_Depth홀위상보강_경로수정_0822.py",
         "구조광_전처리_최종_v2_현재프레임플랫폼기준_Depth홀위상보강_경로수정_0822 (1).py",
         "make_dc_grabcut_object_mask_latest.py",

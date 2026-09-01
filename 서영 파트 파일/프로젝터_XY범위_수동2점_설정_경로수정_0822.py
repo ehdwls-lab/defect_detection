@@ -17,6 +17,7 @@ from pyorbbecsdk import (
 )
 
 from structured_light_paths import PROJECTOR_CALIBRATION_DIR
+from structured_light_projector import select_projector_monitor, xrandr_monitors
 
 
 # ============================================================
@@ -164,59 +165,13 @@ def Color_평균촬영(pipeline):
 # ============================================================
 
 def xrandr_모니터_목록():
-    result = subprocess.run(
-        ["xrandr", "--query"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    pattern = re.compile(
-        r"^(?P<name>\S+)\s+connected(?:\s+primary)?\s+"
-        r"(?P<w>\d+)x(?P<h>\d+)\+(?P<x>-?\d+)\+(?P<y>-?\d+)"
-    )
-
-    monitors = []
-
-    for line in result.stdout.splitlines():
-        match = pattern.search(line)
-
-        if match:
-            monitors.append(
-                {
-                    "name": match.group("name"),
-                    "w": int(match.group("w")),
-                    "h": int(match.group("h")),
-                    "x": int(match.group("x")),
-                    "y": int(match.group("y")),
-                    "primary": " primary " in f" {line} ",
-                }
-            )
-
-    return monitors
+    return xrandr_monitors()
 
 
 def 프로젝터_화면_자동선택():
     monitors = xrandr_모니터_목록()
 
-    selected = next(
-        (
-            monitor
-            for monitor in monitors
-            if "HDMI" in monitor["name"].upper()
-        ),
-        None,
-    )
-
-    if selected is None:
-        selected = next(
-            (
-                monitor
-                for monitor in monitors
-                if not monitor["primary"]
-            ),
-            None,
-        )
+    selected = select_projector_monitor(monitors)
 
     if selected is None:
         raise RuntimeError(
