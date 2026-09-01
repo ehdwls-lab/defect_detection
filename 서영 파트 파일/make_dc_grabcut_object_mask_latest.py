@@ -6,14 +6,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from structured_light_paths import ROOT
+
 
 # ============================================================
 # 기본 경로
 # ============================================================
 
-BASE = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합"
-)
+BASE = ROOT
 
 SAMPLE = (
     BASE

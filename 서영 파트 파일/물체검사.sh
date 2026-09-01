@@ -6,11 +6,31 @@ set -euo pipefail
 # 기본 경로
 # ==============================================================================
 
-BASE="/home/seoyeong/졸업작품/전처리와구조광_통합"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${STRUCTURED_LIGHT_ROOT:-$SCRIPT_DIR}"
+REPOSITORY_ROOT="$(cd "$ROOT/.." && pwd)"
+
+if [ -n "${STRUCTURED_LIGHT_PYTHON:-}" ]; then
+    PYTHON="$STRUCTURED_LIGHT_PYTHON"
+elif [ -x "$REPOSITORY_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPOSITORY_ROOT/.venv/bin/python"
+else
+    PYTHON="$(command -v python3 || true)"
+fi
+
+[ -n "$PYTHON" ] && [ -x "$PYTHON" ] || {
+    echo "❌ 실행 가능한 Python interpreter를 찾지 못했습니다." >&2
+    exit 1
+}
+
+BASE="$ROOT"
 
 SAMPLE_DIR="$BASE/플랫폼 바닥 따기/구조광_전처리/샘플"
 
 cd "$BASE"
+
+echo "Structured Light root: $ROOT"
+echo "Python interpreter: $PYTHON"
 
 
 # ==============================================================================
@@ -60,7 +80,11 @@ echo "을 그대로 사용합니다."
 echo "========================================================================"
 echo
 
-read -rp "물체 배치가 완료되었으면 Enter를 누르세요..."
+if [ "${STRUCTURED_LIGHT_NON_INTERACTIVE:-0}" != "1" ]; then
+    read -rp "물체 배치가 완료되었으면 Enter를 누르세요..."
+else
+    echo "비대화형 모드: 물체 배치 확인 Enter를 건너뜁니다."
+fi
 
 
 # ==============================================================================
@@ -69,7 +93,7 @@ read -rp "물체 배치가 완료되었으면 Enter를 누르세요..."
 
 step "1/6 구조광 촬영 및 전처리"
 
-python3 \
+"$PYTHON" \
     "$BASE/구조광_전처리_최종_v2_현재프레임플랫폼기준_Depth홀위상보강_경로수정_0822.py"
 
 
@@ -111,7 +135,7 @@ V2_DIR="$ROOT/최종자동통합/04_현재프레임플랫폼기준_최종_v2_Dep
 
 step "2/6 DC + GrabCut 물체 마스크 생성"
 
-python3 \
+"$PYTHON" \
     "$BASE/make_dc_grabcut_object_mask_latest.py"
 
 
@@ -156,7 +180,7 @@ fi
 
 step "3/6 Phase 재언래핑 + 물체 Point Cloud 생성"
 
-python3 \
+"$PYTHON" \
     "$BASE/make_phase_relative_reunwrap_holefilled_0822.py" \
     --wrapped "$WRAPPED" \
     --mask "$MASK" \
@@ -186,7 +210,7 @@ echo "$OUT"
 
 step "4/6 플랫폼 바닥 Point Cloud 추가"
 
-python3 \
+"$PYTHON" \
     "$BASE/add_platform_floor_latest.py"
 
 
@@ -225,7 +249,11 @@ echo "$PLY"
 step "5/6 CloudCompare에서 바닥 포함 결과 열기"
 
 
-if command -v CloudCompare >/dev/null 2>&1; then
+if [ "${STRUCTURED_LIGHT_VISUALIZE:-0}" != "1" ]; then
+
+    echo "CloudCompare 시각화 생략 (STRUCTURED_LIGHT_VISUALIZE=1로 활성화)"
+
+elif command -v CloudCompare >/dev/null 2>&1; then
 
     CloudCompare "$PLY" >/dev/null 2>&1 &
 
@@ -253,9 +281,16 @@ fi
 
 step "6/6 평면 검출 + 3축 플랫폼 Pose 계산"
 
-python3 \
+POSE_ARGS=()
+if [ "${STRUCTURED_LIGHT_VISUALIZE:-0}" = "1" ]; then
+    POSE_ARGS+=(--visualize)
+fi
+
+"$PYTHON" \
     "$BASE/0823_test.py" \
-    "$OUT"
+    "$OUT" \
+    --json-out "${OUT%.ply}_pose.json" \
+    "${POSE_ARGS[@]}"
 
 
 # ==============================================================================

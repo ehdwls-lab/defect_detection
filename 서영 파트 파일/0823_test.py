@@ -2,6 +2,8 @@ import os
 import sys
 import shutil
 import subprocess
+import argparse
+import json
 
 import numpy as np
 import open3d as o3d
@@ -112,14 +114,12 @@ NORMAL_MAX_NN = 30
 
 DEFAULT_PLY_FILE = "3_0822_filtered_1st.ply"
 
-
-if len(sys.argv) >= 2:
-
-    ply_file_path = sys.argv[1]
-
-else:
-
-    ply_file_path = DEFAULT_PLY_FILE
+parser = argparse.ArgumentParser(description="구조광 PLY 평면/Pitch/Roll 분석")
+parser.add_argument("ply", nargs="?", default=DEFAULT_PLY_FILE)
+parser.add_argument("--visualize", action="store_true", help="CloudCompare를 명시적으로 실행")
+parser.add_argument("--json-out", help="machine-readable 분석 결과 JSON 경로")
+args = parser.parse_args()
+ply_file_path = args.ply
 
 
 print("\n" + "=" * 70)
@@ -1458,6 +1458,8 @@ total_plane_points = sum(
 
 )
 
+machine_results = []
+
 
 for idx, p in enumerate(
     plane_groups
@@ -1467,6 +1469,21 @@ for idx, p in enumerate(
     res = calculate_shot_pose(
         p
     )
+
+    machine_results.append({
+        "plane_name": p["name"],
+        "dominant": idx == 0,
+        "points_count": int(p["points_count"]),
+        "pitch_deg": float(res["pitch"]),
+        "roll_deg": float(res["roll"]),
+        "raw_pitch_deg": float(res["raw_pitch"]),
+        "raw_roll_deg": float(res["raw_roll"]),
+        "legacy_relative_z": {
+            "value_cm": float(res["z_lift"]),
+            "metric": False,
+            "stm_compatible": False,
+        },
+    })
 
 
     plane_color = colors[
@@ -1612,7 +1629,7 @@ for idx, p in enumerate(
 
     print(
 
-        " >> STM32 Packet : "
+        " >> Legacy pose estimate (STM 전송 금지): "
 
         f"Z:{res['z_lift']:.2f} "
 
@@ -1761,12 +1778,34 @@ print(
 
 print("=" * 70)
 
+if args.json_out:
+    json_path = os.path.abspath(args.json_out)
+    with open(json_path, "w", encoding="utf-8") as json_file:
+        json.dump(
+            {
+                "schema_version": "structured_light_pose_v1",
+                "input_ply": os.path.abspath(ply_file_path),
+                "segmented_ply": os.path.abspath(output_vis_path) if save_success else None,
+                "coordinate_contract": {
+                    "xy_unit": "pixel",
+                    "z_unit": "phase_relative",
+                    "metric_z": False,
+                },
+                "planes": machine_results,
+                "stm_z_command_allowed": False,
+            },
+            json_file,
+            ensure_ascii=False,
+            indent=2,
+        )
+    print(f"Machine-readable result: {json_path}")
+
 
 # ==============================================================================
 # 15. ★ 저장된 결과를 CloudCompare에서 자동으로 열기
 # ==============================================================================
 
-if save_success:
+if save_success and args.visualize:
 
 
     print("\n>> CloudCompare 실행 준비...")

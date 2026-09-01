@@ -1,9 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/seoyeong/졸업작품/전처리와구조광_통합"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${STRUCTURED_LIGHT_ROOT:-$SCRIPT_DIR}"
+REPOSITORY_ROOT="$(cd "$ROOT/.." && pwd)"
+
+if [ -n "${STRUCTURED_LIGHT_PYTHON:-}" ]; then
+    PYTHON="$STRUCTURED_LIGHT_PYTHON"
+elif [ -x "$REPOSITORY_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPOSITORY_ROOT/.venv/bin/python"
+else
+    PYTHON="$(command -v python3 || true)"
+fi
+
+[ -n "$PYTHON" ] && [ -x "$PYTHON" ] || {
+    echo "❌ 실행 가능한 Python interpreter를 찾지 못했습니다." >&2
+    exit 1
+}
+
+BASE="$ROOT"
 
 cd "$BASE"
+
+echo "Structured Light root: $ROOT"
+echo "Python interpreter: $PYTHON"
 
 echo
 echo "========================================================================"
@@ -32,7 +52,7 @@ echo " [1/2] 프로젝터 X/Y 사용범위 설정"
 echo "========================================================================"
 echo
 
-python3 "$BASE/프로젝터_XY범위_수동2점_설정_경로수정_0822.py"
+"$PYTHON" "$BASE/프로젝터_XY범위_수동2점_설정_경로수정_0822.py"
 
 
 # ==============================================================================
@@ -47,7 +67,7 @@ echo
 echo "⚠️  플랫폼 위의 물체를 모두 치워주세요."
 echo
 
-python3 "$BASE/현재배치_빈플랫폼_Depth_E1999_G64_촬영_경로수정_0822.py"
+"$PYTHON" "$BASE/현재배치_빈플랫폼_Depth_E1999_G64_촬영_경로수정_0822.py"
 
 
 echo

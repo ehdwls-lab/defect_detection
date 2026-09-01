@@ -26,7 +26,44 @@ Responsibilities:
 - generate PLY or point-cloud outputs
 - create object mask and platform/floor artifacts
 
-This code remains external. The defect-detection repo does not copy or rewrite its geometry algorithms.
+The geometry algorithms remain preserved in `서영 파트 파일`. Integration changes are limited to
+portable paths, launch policy, preflight, and machine-readable metadata.
+
+## Phase 4A portable operation
+
+Canonical subsystem root:
+
+```text
+/home/dongjin/defect_detection/서영 파트 파일
+```
+
+The scripts use their own directory by default. `STRUCTURED_LIGHT_ROOT` may override it.
+Python selection order is `STRUCTURED_LIGHT_PYTHON`, the repository `.venv/bin/python`, then
+`python3`. Calibration is deliberately manual and separate from `SystemController`:
+
+```bash
+bash "서영 파트 파일/초기세팅.sh"
+```
+
+This creates, without fake defaults:
+
+```text
+프로젝터 수동 범위 확인/프로젝터_세로범위.json
+플랫폼 바닥 따기/현재배치_기준데이터/active/E1999_G64/플랫폼_바닥_depth.npy
+```
+
+Filesystem-only preflight:
+
+```bash
+.venv/bin/python src/tools/check_structured_light.py \
+  --subsystem-root "$PWD/서영 파트 파일" \
+  --result-root "$PWD/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플"
+```
+
+Before calibration the expected status is `CALIBRATION_REQUIRED`, with
+`source_ready=true` and `environment_ready=true`. Inspection defaults to non-interactive mode
+when launched through `ShellStructuredLightRunner`; manual shell execution retains the placement
+prompt. CloudCompare is off unless `STRUCTURED_LIGHT_VISUALIZE=1` is set.
 
 ### Integration Adapter
 

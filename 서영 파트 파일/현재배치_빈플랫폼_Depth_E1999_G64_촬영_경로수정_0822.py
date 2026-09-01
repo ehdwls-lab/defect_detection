@@ -11,8 +11,7 @@
 - D2C(Depth -> Color) 정렬
 - 20프레임 워밍업 후 15프레임 중앙값
 
-최종 저장 위치:
-/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/현재배치_기준데이터/기준촬영_20260818_191520/E1999_G64/플랫폼_바닥_depth.npy
+최종 저장 위치는 structured_light_paths.DEPTH_CALIBRATION_DIR 아래이다.
 
 기존 파일이 있으면 덮어쓰기 전에 자동 백업함.
 마우스 필요 없음. 물체를 치우고 Enter만 누르면 됨.
@@ -37,6 +36,8 @@ from pyorbbecsdk import (
     Pipeline,
 )
 
+from structured_light_paths import DEPTH_CALIBRATION_DIR, PLATFORM_ROOT, ROOT
+
 try:
     from pyorbbecsdk import OBFrameAggregateOutputMode
 except ImportError:
@@ -47,15 +48,10 @@ except ImportError:
 # 현재 검은색 Depth 2D E/G 테스트에서 선택한 기준
 # ============================================================
 
-프로젝트_폴더 = Path("/home/seoyeong/졸업작품/전처리와구조광_통합")
-플랫폼_바닥_폴더 = 프로젝트_폴더 / "플랫폼 바닥 따기"
+프로젝트_폴더 = ROOT
+플랫폼_바닥_폴더 = PLATFORM_ROOT
 
-현재배치_기준_폴더 = (
-    플랫폼_바닥_폴더
-    / "현재배치_기준데이터"
-    / "기준촬영_20260818_191520"
-    / "E1999_G64"
-)
+현재배치_기준_폴더 = DEPTH_CALIBRATION_DIR
 현재배치_기준_폴더.mkdir(parents=True, exist_ok=True)
 
 저장_NPY = 현재배치_기준_폴더 / "플랫폼_바닥_depth.npy"

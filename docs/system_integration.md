@@ -53,15 +53,15 @@ python3 src/tools/test_orbbec_camera.py --output-dir /tmp/orbbec_test
 
 ## Structured Light shell 경계
 
-원본 `서영 파트 파일`은 수정하지 않는다. `ShellStructuredLightRunner`는 subsystem root, result root와 timeout을 config로 받고 `물체검사.sh`를 실행할 수 있다. 실행 전 script와 result directory, script 내부 `BASE` absolute path를 검사한다.
+`서영 파트 파일`의 구조광 알고리즘은 보존하고 경로 및 실행 경계만 portable하게 관리한다. `ShellStructuredLightRunner`는 subsystem root, result root, interpreter, timeout, non-interactive 및 visualization 정책을 config로 받는다.
 
 ```bash
-python3 src/tools/check_structured_light.py \
-  --subsystem-root '/path/to/서영 파트 파일' \
-  --result-root '/path/to/샘플'
+.venv/bin/python src/tools/check_structured_light.py \
+  --subsystem-root "$PWD/서영 파트 파일" \
+  --result-root "$PWD/서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플"
 ```
 
-기본은 preflight only다. 실제 실행에는 `--execute`가 명시적으로 필요하다. 현재 repository 복사본은 `/home/seoyeong/...`를 가리키므로 이 PC에서 preflight가 실패하며, 원본을 자동 수정하거나 우회하지 않는다.
+기본은 preflight only다. 실제 실행에는 `--execute`가 명시적으로 필요하다. 소스와 환경이 준비됐지만 Dongjin 배치의 보정 파일이 아직 없으면 `CALIBRATION_REQUIRED`를 반환한다. 이것은 path/source failure가 아니다.
 
 ## Phase 2/3 범위
 

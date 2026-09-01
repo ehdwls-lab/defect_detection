@@ -50,13 +50,18 @@ try:
 except ImportError:
     OBFrameAggregateOutputMode = None
 
+from structured_light_paths import (
+    CAMERA_SETTINGS_JSON,
+    PLATFORM_DEPTH_NPY,
+    PLATFORM_ROOT,
+    PREPROCESS_ROOT,
+    REFERENCE_4PHASE_DIR,
+    ROOT,
+)
 
-기본_저장_루트 = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/구조광_전처리"
-)
-기본_카메라값_파일 = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/구조광_전처리_촬영/공통_카메라_고정값.json"
-)
+
+기본_저장_루트 = PREPROCESS_ROOT
+기본_카메라값_파일 = CAMERA_SETTINGS_JSON
 
 위상_목록 = [
     (0.0, "000"),
@@ -83,17 +88,13 @@ except ImportError:
 #   최종 전처리는 빨간 사각형 내부 전체 사용
 # ============================================================
 
-프로젝트_폴더 = Path("/home/seoyeong/졸업작품/전처리와구조광_통합")
-플랫폼_바닥_폴더 = 프로젝트_폴더 / "플랫폼 바닥 따기"
+프로젝트_폴더 = ROOT
+플랫폼_바닥_폴더 = PLATFORM_ROOT
 
 선택용_프로젝터_RGB = 255
 
 # 현재 배치에서 최종 선택한 빈 플랫폼 Depth: E1999/G64
-기준_Depth_경로 = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/"
-    "현재배치_기준데이터/기준촬영_20260818_191520/"
-    "E1999_G64/플랫폼_바닥_depth.npy"
-)
+기준_Depth_경로 = PLATFORM_DEPTH_NPY
 
 # 방금 X/Y 2점으로 다시 저장한 범위 JSON
 # 파일명은 기존 호환 때문에 그대로 "프로젝터_세로범위.json"
@@ -2066,9 +2067,7 @@ def 품질영상_저장(folder, quality, rect, preview):
 
 
 
-기본_다중조건_저장_루트 = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/구조광_전처리"
-)
+기본_다중조건_저장_루트 = PREPROCESS_ROOT
 
 
 def 인자_읽기():
@@ -2198,7 +2197,7 @@ def 인자_읽기():
     parser.add_argument(
         "--reference_dir",
         type=str,
-        default="/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/현재배치_기준데이터/기준촬영_20260818_191520/E480_G16/Reference_4위상",
+        default=str(REFERENCE_4PHASE_DIR),
         help=(
             "빈 플랫폼 Reference 4-step 폴더. "
             "phase_000.png, phase_090.png, phase_180.png, phase_270.png 필요."
@@ -6532,10 +6531,7 @@ import matplotlib.pyplot as plt
 # 0. 경로
 # =============================================================================
 
-STRUCT_DIR = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/전처리_실험용/"
-    "남색/촬영_20260813_125737/전처리_결과/구조광_형상복원"
-)
+STRUCT_DIR = PLATFORM_ROOT / "전처리_실험용/남색/촬영_20260813_125737/전처리_결과/구조광_형상복원"
 
 통합_출력_루트 = STRUCT_DIR / "3_6통합 버전"
 
@@ -6560,9 +6556,8 @@ OBJECT_MASK_CANDIDATES = [
     STRUCT_DIR / "실제본넷_위상차_재계산" / "실제_본넷_마스크.npy",
 ]
 
-BRIGHTNESS_ROOT = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/전처리_실험용/"
-    "남색_디퍼런트페이즈가 아쉬움/촬영_20260811_191720/"
+BRIGHTNESS_ROOT = PLATFORM_ROOT / (
+    "전처리_실험용/남색_디퍼런트페이즈가 아쉬움/촬영_20260811_191720/"
     "전처리_결과/구조광_형상복원/밝기 2_30 2씩 증가"
 )
 
@@ -8582,10 +8577,7 @@ import numpy as np
 # =============================================================================
 # 0. 현재 남색 실험 경로
 # =============================================================================
-STRUCT_DIR = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/전처리_실험용/"
-    "남색/촬영_20260813_125737/전처리_결과/구조광_형상복원"
-)
+STRUCT_DIR = PLATFORM_ROOT / "전처리_실험용/남색/촬영_20260813_125737/전처리_결과/구조광_형상복원"
 
 통합_출력_루트 = STRUCT_DIR / "3_6통합 버전"
 
@@ -8606,9 +8598,7 @@ COMMON_VALID_PATH = CLEAN_HDR_DIR / "common_valid_mask.npy"
 ANALYSIS_AREA_PATH = STRUCT_DIR / "object_area_mask.npy"
 
 # 통합 코드가 Depth 자동 검출 때 저장했던 폴더
-DEPTH_RESULT_DIR = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/전처리_실험용/남색"
-)
+DEPTH_RESULT_DIR = PLATFORM_ROOT / "전처리_실험용/남색"
 
 # 이 PNG는 통합 코드에서 실제 Depth 물체 픽셀을 180도 회전한 뒤 저장한 것.
 DEPTH_OBJECT_MASK_PNG = (
@@ -8617,9 +8607,7 @@ DEPTH_OBJECT_MASK_PNG = (
 
 # PNG가 없을 때만 재구성용
 CURRENT_DEPTH_PATH = DEPTH_RESULT_DIR / "현재_물체_depth.npy"
-BACKGROUND_DEPTH_PATH = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/플랫폼_바닥_depth.npy"
-)
+BACKGROUND_DEPTH_PATH = PLATFORM_DEPTH_NPY
 
 OUTPUT_DIR = 통합_출력_루트 / "07_플랫폼기준면_PLY_재생성"
 
@@ -11798,9 +11786,7 @@ ANALYSIS_AREA_PATH = STRUCT_DIR / "object_area_mask.npy"
 DEPTH_RESULT_DIR = Path({str(Path(depth_result_dir))!r})
 DEPTH_OBJECT_MASK_PNG = Path({str(depth_mask_path)!r})
 CURRENT_DEPTH_PATH = Path({str(current_depth_path)!r})
-BACKGROUND_DEPTH_PATH = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/플랫폼 바닥 따기/플랫폼_바닥_depth.npy"
-)
+BACKGROUND_DEPTH_PATH = Path({str(PLATFORM_DEPTH_NPY)!r})
 OUTPUT_DIR = Path({str(Path(output_dir))!r})
 """
 

@@ -16,14 +16,15 @@ from pyorbbecsdk import (
     Pipeline,
 )
 
+from structured_light_paths import PROJECTOR_CALIBRATION_DIR
+
 
 # ============================================================
 # 저장 위치
 # ============================================================
 
-프로젝트_폴더 = Path(
-    "/home/seoyeong/졸업작품/전처리와구조광_통합/프로젝터 수동 범위 확인"
-)
+프로젝트_폴더 = PROJECTOR_CALIBRATION_DIR
+프로젝트_폴더.mkdir(parents=True, exist_ok=True)
 
 # 기존 Depth 코드와 경로 호환을 위해 파일 이름은 그대로 유지
 프로젝터_범위_JSON = (
