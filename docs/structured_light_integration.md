@@ -83,6 +83,24 @@ The shared generator preserves `direction=horizontal`, `period=80`, `base=128`, 
 `amplitude=127`. In the inherited naming convention, `horizontal` varies by image row and
 therefore produces horizontal bands. Do not change this direction merely to match a visual label.
 
+### Persistent projector blackout
+
+`OpenCVProjectorController` owns one fullscreen projector window and reuses the production
+phase generator. `open()` creates the window once and immediately displays BLACK. A four-phase
+session follows `BLACK -> 000 -> 090 -> 180 -> 270 -> BLACK`, with BLACK restoration in a
+`finally` block. `ShellStructuredLightRunner` accepts an injected projector and also restores
+BLACK after success, failure, or interruption; it does not close the window after each scan.
+Platform motion, Automatic Z, and RGB inspection must only run while projector state is BLACK.
+
+Manual visual check (this opens the projector GUI and must be run by the operator):
+
+```bash
+.venv/bin/python src/tools/test_projector_blackout.py --monitor HDMI-0
+```
+
+The sequence is BLACK, WHITE, the four production PHASE frames, then BLACK. Projector power
+control is intentionally outside this interface.
+
 ### Integration Adapter
 
 Responsibilities:
@@ -127,6 +145,44 @@ Responsibilities:
 - refine the inspection Z after the platform is pitched or rolled
 - use RGB + depth quality heuristics
 - choose the best inspection focus plane
+
+Hardware candidate traversal is implemented separately from the pure selector. Candidates and
+`z_max` are mandatory user calibration inputs; structured-light Z is never accepted. At each
+candidate the order is absolute Z move, stable wait, projector BLACK verification, aligned RGB +
+Depth capture, artifact save, and configurable quality evaluation. Passing samples are sent to
+the existing stable tie selector, and the platform returns to the best candidate if necessary.
+
+The hardware CLI is dry-run unless both `--execute` and explicit terminal confirmation are used:
+
+```bash
+.venv/bin/python src/tools/test_automatic_z_hardware.py \
+  --port /dev/ttyACM0 --candidates <comma-separated-z> --z-max <verified-upper-bound>
+```
+
+Execution additionally requires explicit Roll/Pitch, `--ack-mechanical-z-range`, and a
+`--quality-config` JSON. Quality gates are optional so the existing validated subset can be
+represented without invented numbers, but execution requires a validated candidate scoring
+policy. `config/automatic_z_quality.json` records the values recovered from existing inspection
+code. It is execution-ready only for `highest_passing_readiness`; `best_quality_score` remains
+blocked because no prior Automatic Z score/weights were found. There are no production candidate
+or threshold defaults. Candidate RGB PNG, raw depth NPY, per-candidate
+metrics, rejection reasons, and final best artifacts can be written for later InspectionResult
+integration.
+
+The V0 hardware policy reuses the Manual-Z readiness gates through shared `src/core` helpers:
+Depth range 80–2000 mm, Depth valid ratio 0.25, plane inlier ratio 0.25, plane residual 2 mm,
+at least 20 fully covered surface patches, an 18 px FOV edge margin, and 8 consecutive ready
+frames. Candidates must be unique and strictly ascending. Search stops at the first failed
+candidate and selects the last passing Z; if all pass, it selects the highest candidate. RGB
+saturation, dark ratio, Laplacian sharpness, and grayscale contrast are recorded only and are not
+readiness gates.
+
+The integrated ordering remains:
+
+```text
+Structured Light -> BLACK -> Roll/Pitch -> BLACK -> highest-passing Automatic Z
+-> best Z -> BLACK -> surface anomaly inspection
+```
 
 ### Anomaly Detection
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
+import signal
 import shutil
 import subprocess
 import tempfile
@@ -46,6 +48,7 @@ class StructuredLightRunInfo:
     stderr: str = ""
     mock: bool = False
     manifest_path: Path | None = None
+    pose_json_path: Path | None = None
 
 
 class StructuredLightRunner(Protocol):
@@ -54,6 +57,26 @@ class StructuredLightRunner(Protocol):
 
 class StructuredLightPreflightError(RuntimeError):
     pass
+
+
+class StructuredLightProcessError(RuntimeError):
+    """Subprocess failure with output retained for the integration run."""
+
+    def __init__(self, message: str, *, stdout: str = "", stderr: str = "",
+                 return_code: int | None = None) -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+        self.return_code = return_code
+
+
+class StructuredLightProcessInterrupted(KeyboardInterrupt):
+    """Keyboard interrupt raised after the complete scan process group is stopped."""
+
+    def __init__(self, message: str, *, stdout: str = "", stderr: str = "") -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 @dataclass(frozen=True)
@@ -65,6 +88,8 @@ class ShellStructuredLightConfig:
     timeout_sec: float = 900.0
     non_interactive: bool = True
     visualize: bool = False
+    projector_monitor: str = "auto"
+    termination_grace_sec: float = 2.0
 
 
 class ShellStructuredLightRunner:
@@ -80,8 +105,9 @@ class ShellStructuredLightRunner:
         "현재배치_빈플랫폼_Depth_E1999_G64_촬영_경로수정_0822.py",
     )
 
-    def __init__(self, config: ShellStructuredLightConfig) -> None:
+    def __init__(self, config: ShellStructuredLightConfig, *, projector: Any | None = None) -> None:
         self.config = config
+        self.projector = projector
 
     def _root(self) -> Path:
         return self.config.subsystem_root.expanduser().resolve()
@@ -163,18 +189,27 @@ class ShellStructuredLightRunner:
         candidates = list(directory.rglob(pattern))
         return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
 
-    def _write_manifest(self, directory: Path, started_at: str, finished_at: str, return_code: int) -> Path:
+    def _write_manifest(self, directory: Path, started_at: str, finished_at: str,
+                        return_code: int, *, pose_json_path: Path) -> Path:
         artifact_patterns = {
             "integrated_object_only_ply": "03_v2_현재프레임기준_최종_물체만.ply",
             "phase_object_only_ply": "FINAL_DC_MASK_PHASE*.ply",
             "with_floor_ply": "*WITH_FLOOR.ply",
             "segmented_ply": "*_dominant_plane_segmented.ply",
+            "pose_json": "FINAL_DC_MASK_PHASE*_pose.json",
         }
         artifacts: dict[str, str | None] = {}
         for key, pattern in artifact_patterns.items():
+            if key == "pose_json":
+                artifacts[key] = str(pose_json_path.resolve())
+                continue
             candidates = list(directory.rglob(pattern))
             if key == "phase_object_only_ply":
-                candidates = [path for path in candidates if "WITH_FLOOR" not in path.name]
+                candidates = [
+                    path for path in candidates
+                    if "WITH_FLOOR" not in path.name
+                    and "_dominant_plane_segmented" not in path.name
+                ]
             selected = max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
             artifacts[key] = str(selected.resolve()) if selected else None
         root = self._root()
@@ -196,7 +231,88 @@ class ShellStructuredLightRunner:
         path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
+    @staticmethod
+    def _terminate_process_group(process: subprocess.Popen[str], grace_sec: float) -> tuple[str, str]:
+        """Stop the scan shell and all of its camera/GUI descendants."""
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        try:
+            return process.communicate(timeout=grace_sec)
+        except subprocess.TimeoutExpired:
+            # The bash leader may already have exited while a Python/camera/GUI
+            # descendant still owns the inherited stdout/stderr pipes.  Kill
+            # the session group regardless of the leader's poll() result.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            return process.communicate()
+
+    def _execute_script(self, root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        process = subprocess.Popen(
+            ["bash", str(root / self.config.script_name)], cwd=root, env=env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=self.config.timeout_sec)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = self._terminate_process_group(
+                process, self.config.termination_grace_sec,
+            )
+            raise StructuredLightProcessError(
+                f"structured-light scan timed out after {self.config.timeout_sec:g} s",
+                stdout=stdout, stderr=stderr, return_code=process.returncode,
+            )
+        except KeyboardInterrupt:
+            stdout, stderr = self._terminate_process_group(
+                process, self.config.termination_grace_sec,
+            )
+            raise StructuredLightProcessInterrupted(
+                "structured-light scan interrupted by user",
+                stdout=stdout, stderr=stderr,
+            )
+        return subprocess.CompletedProcess(
+            process.args, process.returncode, stdout, stderr,
+        )
+
+    @staticmethod
+    def _write_failure_diagnostics(result_root: Path, *, message: str,
+                                   stdout: str, stderr: str,
+                                   started_at: str, return_code: int | None) -> None:
+        diagnostic = result_root / "_diagnostic"
+        diagnostic.mkdir(parents=True, exist_ok=True)
+        (diagnostic / "failure.json").write_text(
+            json.dumps({
+                "message": message,
+                "started_at": started_at,
+                "failed_at": datetime.now(timezone.utc).isoformat(),
+                "return_code": return_code,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (diagnostic / "stdout.log").write_text(stdout, encoding="utf-8")
+        (diagnostic / "stderr.log").write_text(stderr, encoding="utf-8")
+
     def run_scan(self) -> StructuredLightRunInfo:
+        if self.projector is not None:
+            self.projector.open()
+            self.projector.show_black()
+        try:
+            return self._run_scan()
+        finally:
+            if self.projector is not None:
+                try:
+                    self.projector.show_black()
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "[PROJECTOR] failed to restore BLACK after structured-light scan"
+                    )
+
+    def _run_scan(self) -> StructuredLightRunInfo:
         report = self.preflight_report()
         if report.overall_status is not StructuredLightStatus.READY:
             details = "; ".join((*report.issues, *report.warnings))
@@ -204,28 +320,96 @@ class ShellStructuredLightRunner:
         root = self._root()
         result_root = self.config.result_root.expanduser().resolve()
         result_root.mkdir(parents=True, exist_ok=True)
+        if (not math.isfinite(self.config.termination_grace_sec)
+                or self.config.termination_grace_sec < 0):
+            raise StructuredLightPreflightError(
+                "termination_grace_sec must be finite and non-negative"
+            )
+        before_runs = {
+            path.resolve(): path.stat().st_mtime_ns
+            for path in result_root.glob("촬영_*") if path.is_dir()
+        }
+        before_poses = {
+            path.resolve(): path.stat().st_mtime_ns
+            for run in result_root.glob("촬영_*") if run.is_dir()
+            for path in run.rglob("FINAL_DC_MASK_PHASE*_pose.json")
+        }
         started_at = datetime.now(timezone.utc).isoformat()
         env = os.environ.copy()
         env.update({
             "STRUCTURED_LIGHT_ROOT": str(root), "STRUCTURED_LIGHT_PYTHON": str(report.python_path),
             "STRUCTURED_LIGHT_NON_INTERACTIVE": "1" if self.config.non_interactive else "0",
             "STRUCTURED_LIGHT_VISUALIZE": "1" if self.config.visualize else "0",
+            "STRUCTURED_LIGHT_MONITOR": self.config.projector_monitor,
+            "STRUCTURED_LIGHT_RESULT_ROOT": str(result_root),
         })
-        completed = subprocess.run(
-            ["bash", str(root / self.config.script_name)], cwd=root, env=env,
-            text=True, capture_output=True, timeout=self.config.timeout_sec, check=False,
-        )
+        try:
+            completed = self._execute_script(root, env)
+        except (StructuredLightProcessError, StructuredLightProcessInterrupted) as exc:
+            self._write_failure_diagnostics(
+                result_root, message=str(exc), stdout=exc.stdout, stderr=exc.stderr,
+                started_at=started_at,
+                return_code=getattr(exc, "return_code", None),
+            )
+            raise
         finished_at = datetime.now(timezone.utc).isoformat()
         if completed.returncode != 0:
-            raise RuntimeError(f"structured-light scan failed rc={completed.returncode}: {completed.stderr.strip()}")
+            message = (
+                f"structured-light scan failed rc={completed.returncode}: "
+                f"{completed.stderr.strip()}"
+            )
+            self._write_failure_diagnostics(
+                result_root, message=message, stdout=completed.stdout,
+                stderr=completed.stderr, started_at=started_at,
+                return_code=completed.returncode,
+            )
+            raise StructuredLightProcessError(
+                message, stdout=completed.stdout, stderr=completed.stderr,
+                return_code=completed.returncode,
+            )
         runs = [path for path in result_root.glob("촬영_*") if path.is_dir()]
         if not runs:
             raise RuntimeError("structured-light scan completed but no 촬영_* result directory was found")
-        directory = max(runs, key=lambda path: path.stat().st_mtime)
-        manifest_path = self._write_manifest(directory, started_at, finished_at, completed.returncode)
+        current_runs = [
+            path for path in runs
+            if path.resolve() not in before_runs
+            or path.stat().st_mtime_ns > before_runs[path.resolve()]
+        ]
+        if not current_runs:
+            message = (
+                "structured-light scan completed but no new or updated 촬영_* directory was produced"
+            )
+            self._write_failure_diagnostics(
+                result_root, message=message, stdout=completed.stdout,
+                stderr=completed.stderr, started_at=started_at,
+                return_code=completed.returncode,
+            )
+            raise RuntimeError(message)
+        directory = max(current_runs, key=lambda path: path.stat().st_mtime_ns)
+        pose_candidates = sorted(
+            path for path in directory.rglob("FINAL_DC_MASK_PHASE*_pose.json")
+            if path.resolve() not in before_poses
+            or path.stat().st_mtime_ns > before_poses[path.resolve()]
+        )
+        if len(pose_candidates) != 1:
+            message = (
+                "structured-light scan must produce exactly one FINAL_DC_MASK_PHASE*_pose.json "
+                f"created or updated by this invocation; found {len(pose_candidates)}"
+            )
+            self._write_failure_diagnostics(
+                result_root, message=message, stdout=completed.stdout,
+                stderr=completed.stderr, started_at=started_at,
+                return_code=completed.returncode,
+            )
+            raise RuntimeError(message)
+        pose_json_path = pose_candidates[0].resolve()
+        manifest_path = self._write_manifest(
+            directory, started_at, finished_at, completed.returncode,
+            pose_json_path=pose_json_path,
+        )
         return StructuredLightRunInfo(
             directory.name, directory, completed.returncode, completed.stdout,
-            completed.stderr, False, manifest_path,
+            completed.stderr, False, manifest_path, pose_json_path,
         )
 
 

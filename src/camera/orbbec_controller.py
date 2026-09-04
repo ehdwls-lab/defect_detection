@@ -61,6 +61,25 @@ class OrbbecCameraController:
         color_bgr, depth_mm = wait_for_aligned_pair(self._pipeline, self._align_filter)
         return RGBDepthFrame(color_bgr=color_bgr, depth_mm=depth_mm, timestamp=time.time())
 
+    def color_intrinsics(self, width: int, height: int):
+        """Return validated intrinsics for the aligned color/depth grid."""
+        if self._pipeline is None:
+            raise RuntimeError("Orbbec camera is not started")
+        from src.integration.metric_pose import CameraIntrinsics
+        from src.integration.orbbec_intrinsics import build_d2c_intrinsics_payload
+
+        payload = build_d2c_intrinsics_payload(
+            self._pipeline.get_camera_param(),
+            depth_grid_width=int(width), depth_grid_height=int(height),
+        )
+        raw = payload["color_intrinsics"]
+        return CameraIntrinsics(
+            fx=float(raw["fx"]), fy=float(raw["fy"]),
+            cx=float(raw["cx"]), cy=float(raw["cy"]),
+            width=int(raw["width"]), height=int(raw["height"]),
+            source=str(payload["intrinsic_source"]), aligned_to="color",
+        )
+
     def close(self) -> None:
         if self._pipeline is not None:
             self._pipeline.stop()

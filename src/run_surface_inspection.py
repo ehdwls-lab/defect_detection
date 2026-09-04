@@ -20,17 +20,18 @@ from src.core.inspection_quality import evaluate_inspection_readiness
 from src.core.patch_extractor import generate_surface_patches
 from src.core.preprocessing import preprocess_surface_image
 from src.core.surface_roi import erode_surface_mask
-from src.test_surface_only_pose_inspection import (
+from src.core.workspace import fallback_workspace_mask, make_border_ring
+from src.core.aruco_board import (
     create_aruco_detector,
     detect_markers,
+    get_board_outer_quad,
+    polygon_mask,
+)
+from src.test_surface_only_pose_inspection import (
     draw_mask_contour,
     draw_status,
-    fallback_workspace_mask,
     find_color_profile,
     find_depth_profile,
-    get_board_outer_quad,
-    make_border_ring,
-    polygon_mask,
     render_height_map,
     temporal_median_depth,
     wait_for_aligned_pair,

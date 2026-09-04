@@ -8,12 +8,15 @@ from src.core.inspection_quality import evaluate_inspection_readiness
 from src.core.patch_extractor import generate_surface_patches
 from src.core.preprocessing import preprocess_surface_image
 from src.core.surface_roi import erode_surface_mask, mask_touches_frame_edge
+from src.core.workspace import fallback_workspace_mask, make_border_ring
 from src.preprocessing import preprocess_anomaly
 from src.test_surface_only_pose_inspection import (
     erode_surface_mask as ref_erode_surface_mask,
     evaluate_inspection_readiness as ref_evaluate_inspection_readiness,
     generate_surface_patches as ref_generate_surface_patches,
     mask_touches_frame_edge as ref_mask_touches_frame_edge,
+    fallback_workspace_mask as ref_fallback_workspace_mask,
+    make_border_ring as ref_make_border_ring,
 )
 
 
@@ -100,3 +103,14 @@ def test_mask_touches_frame_edge_matches_reference():
     mask[20:40, 25:45] = 255
 
     assert mask_touches_frame_edge(mask, 10) == ref_mask_touches_frame_edge(mask, 10)
+
+
+def test_workspace_helpers_match_reference():
+    shape = (800, 1280, 3)
+    result = fallback_workspace_mask(shape, 80)
+    expected = ref_fallback_workspace_mask(shape, 80)
+    assert np.array_equal(result, expected)
+    assert np.array_equal(
+        make_border_ring(result, 120, is_fraction=False),
+        ref_make_border_ring(expected, 120, is_fraction=False),
+    )

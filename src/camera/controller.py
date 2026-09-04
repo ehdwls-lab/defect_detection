@@ -11,6 +11,7 @@ class RGBDepthFrame:
     color_bgr: np.ndarray
     depth_mm: np.ndarray
     timestamp: float
+    infrared: np.ndarray | None = None
 
 
 class CameraController(Protocol):

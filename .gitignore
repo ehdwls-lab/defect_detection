@@ -59,3 +59,7 @@ archive/results_old/
 # Runtime logs
 Log/
 *.log
+
+# Structured-light capture outputs are runtime artifacts.  The source scripts and
+# active platform calibration under the same subsystem remain versioned.
+서영 파트 파일/플랫폼 바닥 따기/구조광_전처리/샘플/촬영_*/

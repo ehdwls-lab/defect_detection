@@ -8,6 +8,20 @@ import json
 import numpy as np
 import open3d as o3d
 
+REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, REPOSITORY_ROOT)
+
+from src.config import DepthConfig
+from src.integration.metric_pose import (
+    MetricFitConfig,
+    build_metric_pose,
+    load_axis_contract,
+    load_intrinsics,
+    ply_xy_to_depth_pixels,
+)
+from src.integration.platform_limits import PLATFORM_RP_LIMIT_DEG
+
 
 # ==============================================================================
 # 0. 파라미터 설정
@@ -16,8 +30,6 @@ import open3d as o3d
 # ------------------------------------------------------------------------------
 # 3축 플랫폼 물리 제약
 # ------------------------------------------------------------------------------
-
-PLATFORM_MAX_TILT_DEG = 22.5
 
 MIN_OPTICAL_DIST_CM = 20.0
 
@@ -118,6 +130,9 @@ parser = argparse.ArgumentParser(description="구조광 PLY 평면/Pitch/Roll �
 parser.add_argument("ply", nargs="?", default=DEFAULT_PLY_FILE)
 parser.add_argument("--visualize", action="store_true", help="CloudCompare를 명시적으로 실행")
 parser.add_argument("--json-out", help="machine-readable 분석 결과 JSON 경로")
+parser.add_argument("--depth-npy", help="same-frame software-D2C aligned depth (mm)")
+parser.add_argument("--intrinsics-json", help="SDK color intrinsics artifact for aligned depth")
+parser.add_argument("--axis-contract-json", help="verified camera-to-platform axis/sign contract")
 args = parser.parse_args()
 ply_file_path = args.ply
 
@@ -1260,9 +1275,9 @@ def calculate_shot_pose(
 
         raw_target_roll,
 
-        -PLATFORM_MAX_TILT_DEG,
+        -PLATFORM_RP_LIMIT_DEG,
 
-        PLATFORM_MAX_TILT_DEG
+        PLATFORM_RP_LIMIT_DEG
 
     )
 
@@ -1271,9 +1286,9 @@ def calculate_shot_pose(
 
         raw_target_pitch,
 
-        -PLATFORM_MAX_TILT_DEG,
+        -PLATFORM_RP_LIMIT_DEG,
 
-        PLATFORM_MAX_TILT_DEG
+        PLATFORM_RP_LIMIT_DEG
 
     )
 
@@ -1459,6 +1474,35 @@ total_plane_points = sum(
 )
 
 machine_results = []
+pixel_memberships = {}
+
+metric_depth = None
+metric_intrinsics = None
+metric_axis_contract = load_axis_contract(args.axis_contract_json)
+metric_setup_error = None
+if args.depth_npy and args.intrinsics_json:
+    try:
+        metric_depth = np.load(args.depth_npy).astype(np.float32)
+        metric_intrinsics = load_intrinsics(args.intrinsics_json)
+        if metric_depth.shape != (metric_intrinsics.height, metric_intrinsics.width):
+            raise ValueError(
+                f"depth/intrinsics grid mismatch: {metric_depth.shape} vs "
+                f"{(metric_intrinsics.height, metric_intrinsics.width)}"
+            )
+    except Exception as exc:
+        metric_setup_error = f"{type(exc).__name__}: {exc}"
+else:
+    metric_setup_error = "same-frame depth and SDK intrinsics artifacts are required"
+
+depth_config = DepthConfig()
+metric_fit_config = MetricFitConfig(
+    min_depth_mm=depth_config.min_mm,
+    max_depth_mm=depth_config.max_mm,
+    ransac_threshold_mm=depth_config.plane_ransac_mm,
+    ransac_iterations=depth_config.plane_ransac_iters,
+    min_points=depth_config.plane_min_points,
+    max_points=depth_config.plane_max_points,
+)
 
 
 for idx, p in enumerate(
@@ -1470,7 +1514,43 @@ for idx, p in enumerate(
         p
     )
 
+    metric_pose = {
+        "source": "orbbec_depth",
+        "physical_metric": True,
+        "status": "DETECTED",
+        "reachable": False,
+        "reject_reason": metric_setup_error,
+        "depth_points_count": 0,
+        "depth_coverage": 0.0,
+    }
+    membership = None
+    if metric_depth is not None and metric_intrinsics is not None and metric_setup_error is None:
+        plane_points = np.asarray(p["pcd"].points)
+        pixels_uv = ply_xy_to_depth_pixels(
+            plane_points,
+            metric_intrinsics.width,
+            metric_intrinsics.height,
+            transform="rotate_180",
+        )
+        membership_key = f"plane_{idx:03d}_depth_pixels_uv"
+        pixel_memberships[membership_key] = pixels_uv.astype(np.int32)
+        membership = {
+            "sidecar_key": membership_key,
+            "coordinate_order": "u,v",
+            "grid": "orbbec_color_aligned_depth",
+            "structured_light_to_depth_transform": "rotate_180",
+            "pixel_count": int(len(pixels_uv)),
+        }
+        metric_pose = build_metric_pose(
+            metric_depth,
+            pixels_uv,
+            metric_intrinsics,
+            metric_axis_contract,
+            metric_fit_config,
+        )
+
     machine_results.append({
+        "source_plane_index": idx,
         "plane_name": p["name"],
         "dominant": idx == 0,
         "points_count": int(p["points_count"]),
@@ -1478,6 +1558,9 @@ for idx, p in enumerate(
         "roll_deg": float(res["roll"]),
         "raw_pitch_deg": float(res["raw_pitch"]),
         "raw_roll_deg": float(res["raw_roll"]),
+        "legacy_pose_semantics": "phase_space_heuristic_metadata_only",
+        "pixel_membership": membership,
+        "metric_pose": metric_pose,
         "legacy_relative_z": {
             "value_cm": float(res["z_lift"]),
             "metric": False,
@@ -1780,6 +1863,12 @@ print("=" * 70)
 
 if args.json_out:
     json_path = os.path.abspath(args.json_out)
+    membership_path = os.path.splitext(json_path)[0] + "_plane_pixels.npz"
+    if pixel_memberships:
+        np.savez_compressed(membership_path, **pixel_memberships)
+        for plane in machine_results:
+            if plane["pixel_membership"] is not None:
+                plane["pixel_membership"]["sidecar_path"] = membership_path
     with open(json_path, "w", encoding="utf-8") as json_file:
         json.dump(
             {
@@ -1790,6 +1879,16 @@ if args.json_out:
                     "xy_unit": "pixel",
                     "z_unit": "phase_relative",
                     "metric_z": False,
+                    "image_grid": "structured_light_color_rotated_180",
+                    "depth_grid": "orbbec_color_aligned_original",
+                    "structured_light_to_depth_pixel_transform": "rotate_180",
+                },
+                "metric_pose_contract": {
+                    "depth_path": os.path.abspath(args.depth_npy) if args.depth_npy else None,
+                    "intrinsics_path": os.path.abspath(args.intrinsics_json) if args.intrinsics_json else None,
+                    "plane_membership_path": membership_path if pixel_memberships else None,
+                    "platform_axis_contract_verified": metric_axis_contract.verified,
+                    "legacy_pose_motion_allowed": False,
                 },
                 "planes": machine_results,
                 "stm_z_command_allowed": False,

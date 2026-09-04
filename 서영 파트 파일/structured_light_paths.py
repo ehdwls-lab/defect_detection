@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 ENV_ROOT = "STRUCTURED_LIGHT_ROOT"
+ENV_RESULT_ROOT = "STRUCTURED_LIGHT_RESULT_ROOT"
 
 
 def structured_light_root() -> Path:
@@ -30,6 +31,7 @@ PLATFORM_DEPTH_NPY = DEPTH_CALIBRATION_DIR / "플랫폼_바닥_depth.npy"
 REFERENCE_4PHASE_DIR = CALIBRATION_ROOT / "E480_G16" / "Reference_4위상"
 PREPROCESS_ROOT = PLATFORM_ROOT / "구조광_전처리"
 SAMPLE_ROOT = PREPROCESS_ROOT / "샘플"
+RESULT_ROOT = Path(os.environ.get(ENV_RESULT_ROOT, str(SAMPLE_ROOT))).expanduser().resolve()
 CAMERA_SETTINGS_JSON = ROOT / "구조광_전처리_촬영" / "공통_카메라_고정값.json"
 
 
@@ -38,4 +40,3 @@ def ensure_output_directories() -> None:
     SAMPLE_ROOT.mkdir(parents=True, exist_ok=True)
     PROJECTOR_CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
     DEPTH_CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
-

@@ -1,9 +1,6 @@
 # Structured-light and real-hardware extras verified in the current project venv.
-# Install explicitly when provisioning hardware; normal mock development does not require these.
-numpy==1.26.4
-opencv-python==4.11.0.86
+# Install explicitly when provisioning hardware; no hardware is opened by installation.
+-r requirements.txt
 open3d==0.18.0
 matplotlib==3.10.9
 pyorbbecsdk2==2.1.1
-scipy==1.15.3
-Pillow==12.2.0

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from pathlib import Path
+from typing import Sequence
 
 import cv2
 import numpy as np
@@ -65,23 +67,78 @@ def calculate_positions(length: int, patch_size: int, stride: int) -> list[int]:
     return list(range(0, length - patch_size + 1, stride))
 
 
+def select_patch_positions(
+    image_shape: tuple[int, ...],
+    patch_size: int,
+    stride: int,
+    *,
+    surface_mask: np.ndarray | None = None,
+    min_surface_coverage: float | None = None,
+    allowed_positions: Sequence[tuple[int, int]] | None = None,
+) -> list[tuple[int, int]]:
+    """Select grid patches or an explicit training-region-compatible position set."""
+    height, width = image_shape[:2]
+    if surface_mask is not None and allowed_positions is not None:
+        raise ValueError("surface_mask and allowed_positions are mutually exclusive")
+    if allowed_positions is not None:
+        positions: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for raw_x, raw_y in allowed_positions:
+            x, y = int(raw_x), int(raw_y)
+            if x < 0 or y < 0 or x + patch_size > width or y + patch_size > height:
+                raise ValueError(f"allowed patch position is outside image bounds: {(x, y)}")
+            if (x, y) not in seen:
+                seen.add((x, y))
+                positions.append((x, y))
+        return positions
+
+    positions = [
+        (x, y)
+        for y in calculate_positions(height, patch_size, stride)
+        for x in calculate_positions(width, patch_size, stride)
+    ]
+    if surface_mask is None:
+        return positions
+    mask = np.asarray(surface_mask)
+    if mask.ndim != 2 or mask.shape != (height, width):
+        raise ValueError(
+            f"surface mask shape must match image: mask={mask.shape}, image={(height, width)}"
+        )
+    if min_surface_coverage is None or not 0.0 < float(min_surface_coverage) <= 1.0:
+        raise ValueError("min_surface_coverage must be in (0, 1] when surface_mask is used")
+    threshold = float(min_surface_coverage)
+    return [
+        (x, y) for x, y in positions
+        if float(np.mean(mask[y:y + patch_size, x:x + patch_size] > 0)) >= threshold
+    ]
+
+
 def make_patch_tensor(
     image_bgr: np.ndarray,
     patch_size: int,
     stride: int,
     preprocessing_params: dict[str, float],
+    *,
+    surface_mask: np.ndarray | None = None,
+    min_surface_coverage: float | None = None,
+    allowed_positions: Sequence[tuple[int, int]] | None = None,
 ) -> tuple[Tensor, list[tuple[int, int]]]:
     processed_bgr = preprocess_anomaly(image_bgr, **preprocessing_params)
     height, width = processed_bgr.shape[:2]
     patches: list[Tensor] = []
-    positions: list[tuple[int, int]] = []
-    for y in calculate_positions(height, patch_size, stride):
-        for x in calculate_positions(width, patch_size, stride):
-            patch_bgr = processed_bgr[y:y + patch_size, x:x + patch_size]
-            patch_rgb = cv2.cvtColor(patch_bgr, cv2.COLOR_BGR2RGB)
-            patch = np.ascontiguousarray(patch_rgb.transpose(2, 0, 1))
-            patches.append(torch.from_numpy(patch).float() / 255.0)
-            positions.append((x, y))
+    positions = select_patch_positions(
+        processed_bgr.shape, patch_size, stride,
+        surface_mask=surface_mask,
+        min_surface_coverage=min_surface_coverage,
+        allowed_positions=allowed_positions,
+    )
+    for x, y in positions:
+        patch_bgr = processed_bgr[y:y + patch_size, x:x + patch_size]
+        patch_rgb = cv2.cvtColor(patch_bgr, cv2.COLOR_BGR2RGB)
+        patch = np.ascontiguousarray(patch_rgb.transpose(2, 0, 1))
+        patches.append(torch.from_numpy(patch).float() / 255.0)
+    if not patches:
+        raise ValueError("no patches selected for anomaly inference")
     return torch.stack(patches), positions
 
 
@@ -103,8 +160,17 @@ def inspect_image(
     batch_size: int,
     device: torch.device,
     preprocessing_params: dict[str, float],
+    *,
+    surface_mask: np.ndarray | None = None,
+    min_surface_coverage: float | None = None,
+    allowed_positions: Sequence[tuple[int, int]] | None = None,
 ) -> tuple[dict[str, np.ndarray], list[tuple[int, int]], np.ndarray, dict[str, np.ndarray], np.ndarray]:
-    patches, positions = make_patch_tensor(image_bgr, patch_size, stride, preprocessing_params)
+    patches, positions = make_patch_tensor(
+        image_bgr, patch_size, stride, preprocessing_params,
+        surface_mask=surface_mask,
+        min_surface_coverage=min_surface_coverage,
+        allowed_positions=allowed_positions,
+    )
     height, width = image_bgr.shape[:2]
     reconstruction_sum = np.zeros((height, width, 3), dtype=np.float32)
     residual_sum = np.zeros((height, width), dtype=np.float32)
@@ -140,7 +206,25 @@ def inspect_image(
     return scores, positions, reconstructed_rgb, score_maps, residual_map
 
 
-def build_anomaly_mask(image_shape: tuple[int, int], positions: list[tuple[int, int]], scores: np.ndarray, threshold: float, patch_size: int) -> np.ndarray:
+def build_inspected_mask(
+    image_shape: tuple[int, int],
+    positions: Sequence[tuple[int, int]],
+    patch_size: int,
+    surface_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    inspected = np.zeros(image_shape, dtype=np.uint8)
+    for x, y in positions:
+        inspected[y:y + patch_size, x:x + patch_size] = 255
+    if surface_mask is not None:
+        inspected[np.asarray(surface_mask) <= 0] = 0
+    return inspected
+
+
+def build_anomaly_mask(
+    image_shape: tuple[int, int], positions: list[tuple[int, int]],
+    scores: np.ndarray, threshold: float, patch_size: int,
+    surface_mask: np.ndarray | None = None,
+) -> np.ndarray:
     height, width = image_shape
     votes = np.zeros((height, width), dtype=np.float32)
     total = np.zeros((height, width), dtype=np.float32)
@@ -150,14 +234,23 @@ def build_anomaly_mask(image_shape: tuple[int, int], positions: list[tuple[int, 
         if score > threshold:
             votes[patch_slice] += 1.0
     mask = (votes / np.maximum(total, 1.0) >= 0.5).astype(np.uint8) * 255
-    return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8))
+    if surface_mask is not None:
+        mask[np.asarray(surface_mask) <= 0] = 0
+    return mask
 
 
-def make_heatmap(score_map: np.ndarray, validation_scores: np.ndarray, test_scores: np.ndarray) -> np.ndarray:
+def make_heatmap(
+    score_map: np.ndarray, validation_scores: np.ndarray, test_scores: np.ndarray,
+    inspected_mask: np.ndarray | None = None,
+) -> np.ndarray:
     lower = float(np.percentile(validation_scores, 1.0))
     upper = max(float(np.percentile(test_scores, 99.0)), float(np.percentile(validation_scores, 99.0)))
     normalized = np.clip((score_map - lower) / max(upper - lower, 1e-12), 0.0, 1.0)
-    return cv2.applyColorMap((normalized * 255.0).astype(np.uint8), cv2.COLORMAP_JET)
+    heatmap = cv2.applyColorMap((normalized * 255.0).astype(np.uint8), cv2.COLORMAP_JET)
+    if inspected_mask is not None:
+        heatmap[np.asarray(inspected_mask) <= 0] = 0
+    return heatmap
 
 
 def make_threshold_overlay(original_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -195,16 +288,84 @@ def save_test_scores(output_path: Path, positions: list[tuple[int, int]], scores
             writer.writerow(row)
 
 
-def read_validation_paths(manifest_path: Path) -> list[Path]:
-    paths = []
+def read_validation_entries(manifest_path: Path) -> list[dict[str, Path | None]]:
+    entries: list[dict[str, Path | None]] = []
     with manifest_path.open("r", newline="", encoding="utf-8-sig") as csv_file:
         for row in csv.DictReader(csv_file):
             if row.get("split") == "val" and row.get("label") == "normal":
                 path = Path(row["path"])
-                paths.append(path if path.is_absolute() else PROJECT_ROOT / path)
-    if not paths:
+                path = path if path.is_absolute() else PROJECT_ROOT / path
+                mask_value = row.get("mask", "").strip()
+                mask_path = Path(mask_value) if mask_value else None
+                if mask_path is not None and not mask_path.is_absolute():
+                    mask_path = PROJECT_ROOT / mask_path
+                region_value = row.get("regions", "").strip()
+                region_path = Path(region_value) if region_value else None
+                if region_path is not None and not region_path.is_absolute():
+                    region_path = PROJECT_ROOT / region_path
+                entries.append({
+                    "path": path, "mask": mask_path, "regions": region_path,
+                })
+    if not entries:
         raise RuntimeError(f"정상 validation image가 없습니다: {manifest_path}")
+    return entries
+
+
+def read_validation_paths(manifest_path: Path) -> list[Path]:
+    """Backward-compatible path-only manifest reader."""
+    paths: list[Path] = []
+    for entry in read_validation_entries(manifest_path):
+        path = entry["path"]
+        assert path is not None
+        paths.append(path)
     return paths
+
+
+def validation_region_positions(
+    entry: dict[str, Path | None], image_shape: tuple[int, ...],
+    patch_size: int, stride: int,
+) -> list[tuple[int, int]] | None:
+    """Resolve PatchDataset-compatible mask/region validation positions."""
+    mask_path = entry.get("mask")
+    if mask_path is not None:
+        if not mask_path.is_file():
+            raise FileNotFoundError(f"validation mask PNG가 없습니다: {mask_path}")
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        expected_shape = tuple(image_shape[:2])
+        if mask is None:
+            raise ValueError(f"validation mask PNG를 읽을 수 없습니다: {mask_path}")
+        if mask.shape != expected_shape:
+            raise ValueError(
+                "validation mask가 이미지와 정렬되지 않았습니다: "
+                f"mask={mask.shape}, image={expected_shape}: {mask_path}"
+            )
+        positions = select_patch_positions(
+            image_shape, patch_size, stride,
+            surface_mask=mask, min_surface_coverage=1.0,
+        )
+        if not positions:
+            raise ValueError(f"validation mask에서 patch가 생성되지 않습니다: {mask_path}")
+        return positions
+    region_path = entry.get("regions")
+    if region_path is None:
+        return None
+    if not region_path.is_file():
+        raise FileNotFoundError(f"validation region JSON이 없습니다: {region_path}")
+    payload = json.loads(region_path.read_text(encoding="utf-8"))
+    regions = payload.get("regions", [])
+    if not isinstance(regions, list) or not regions:
+        raise ValueError(f"validation region이 비어 있습니다: {region_path}")
+    try:
+        from src.patch_dataset import generate_region_patch_samples
+    except ModuleNotFoundError:
+        from patch_dataset import generate_region_patch_samples
+    samples = generate_region_patch_samples(
+        image_shape, regions, patch_size, stride,
+    )
+    positions = [(left, top) for _, left, top in samples]
+    if not positions:
+        raise ValueError(f"validation region에서 patch가 생성되지 않습니다: {region_path}")
+    return positions
 
 
 def load_model(checkpoint: dict, device: torch.device) -> ConvAutoencoder:
@@ -244,9 +405,18 @@ def main() -> None:
 
     validation_scores: dict[str, list[float]] = {method: [] for method in SCORE_METHODS}
     validation_rows: list[dict[str, object]] = []
-    validation_paths = read_validation_paths(args.val_manifest)
-    for validation_path in validation_paths:
-        scores, positions, _, _, _ = inspect_image(model, load_bgr_image(validation_path), patch_size, stride, args.batch_size, device, preprocessing_params)
+    validation_entries = read_validation_entries(args.val_manifest)
+    for validation_entry in validation_entries:
+        validation_path = validation_entry["path"]
+        assert validation_path is not None
+        validation_image = load_bgr_image(validation_path)
+        allowed_positions = validation_region_positions(
+            validation_entry, validation_image.shape, patch_size, stride,
+        )
+        scores, positions, _, _, _ = inspect_image(
+            model, validation_image, patch_size, stride, args.batch_size, device,
+            preprocessing_params, allowed_positions=allowed_positions,
+        )
         for index, (x, y) in enumerate(positions):
             row: dict[str, object] = {"image": validation_path.name, "patch_index": index, "x": x, "y": y}
             for method in SCORE_METHODS:

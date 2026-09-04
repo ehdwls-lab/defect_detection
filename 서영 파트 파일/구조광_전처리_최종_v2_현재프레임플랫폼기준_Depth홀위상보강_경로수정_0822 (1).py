@@ -27,10 +27,15 @@ import json
 import heapq
 import re
 import subprocess
+import sys
 import time
 import warnings
 from datetime import datetime
 from pathlib import Path
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import cv2
 import numpy as np
@@ -267,6 +272,27 @@ def Depth프레임_mm로_변환(depth_frame):
         raw.astype(np.float32)
         * scale
     )
+
+
+def Orbbec_D2C_intrinsics_저장(pipeline, path, width, height):
+    """Persist SDK color intrinsics used by software D2C aligned depth."""
+    try:
+        from src.integration.orbbec_intrinsics import build_d2c_intrinsics_payload
+
+        camera_param = pipeline.get_camera_param()
+        payload = build_d2c_intrinsics_payload(
+            camera_param,
+            depth_grid_width=width,
+            depth_grid_height=height,
+        )
+        Path(path).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "D2C metric pose용 Orbbec color intrinsics를 SDK에서 저장하지 못했습니다"
+        ) from exc
 
 def 여러Depth_중앙값(depth_frames):
     stack = np.stack(
@@ -4647,6 +4673,7 @@ def Depth기반_자동_물체영역_검출(cap, 저장_이름, 결과_폴더_직
     )
 
     현재_Depth_경로 = 결과_폴더 / "현재_물체_depth.npy"
+    현재_Depth_intrinsics_경로 = 결과_폴더 / "현재_물체_depth_intrinsics.json"
     현재_Depth_PNG_경로 = 결과_폴더 / "현재_물체_depth.png"
     높이차_시각화_경로 = 결과_폴더 / "플랫폼과_높이차.png"
 
@@ -5108,6 +5135,13 @@ def Depth기반_자동_물체영역_검출(cap, 저장_이름, 결과_폴더_직
         np.save(
             현재_Depth_경로,
             current_depth,
+        )
+
+        Orbbec_D2C_intrinsics_저장(
+            pipeline,
+            현재_Depth_intrinsics_경로,
+            image_w,
+            image_h,
         )
 
         cv2.imwrite(
@@ -13228,16 +13262,22 @@ def 현재프레임_플랫폼피팅마스크_생성(
     object_mask,
     domain,
     object_area,
+    diagnostics=None,
 ):
     """
     물체 주변은 팽창해서 제외하고,
     실제로 연결된 가장 큰 플랫폼 영역만 fitting에 사용한다.
     """
-    object_excluded = (
+    exclusion_mask = (
         현재프레임_마스크팽창(
             object_mask,
             현재프레임_물체제외_팽창PX,
         )
+    )
+
+    object_excluded = (
+        np.asarray(domain, dtype=bool)
+        & (~exclusion_mask)
     )
 
     # 분석 사각형 가장자리 영향 제거.
@@ -13256,20 +13296,85 @@ def 현재프레임_플랫폼피팅마스크_생성(
         > 0
     )
 
-    platform_fit = (
-        np.asarray(
-            domain,
-            dtype=bool,
-        )
-        & (~object_excluded)
+    platform_candidate = (
+        object_excluded
         & area_eroded
     )
 
     # 물체 내부 Depth hole이 임시로 플랫폼처럼 보여도,
     # 바깥 플랫폼과 분리돼 있으면 fitting에 들어오지 않도록 가장 큰 연결영역만 사용.
-    return 현재프레임_가장큰연결영역(
-        platform_fit
+    platform_fit = 현재프레임_가장큰연결영역(
+        platform_candidate
     )
+
+    if diagnostics is not None:
+        diagnostics_dir = Path(diagnostics["directory"])
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        candidate_u8 = platform_candidate.astype(np.uint8)
+        component_total, _, _, _ = cv2.connectedComponentsWithStats(
+            candidate_u8,
+            connectivity=8,
+        )
+        connected_component_count = max(0, int(component_total) - 1)
+        counts = diagnostics["counts"]
+        counts.update({
+            "object_excluded_count": int(np.count_nonzero(object_excluded)),
+            "area_eroded_count": int(np.count_nonzero(area_eroded)),
+            "platform_candidate_count": int(np.count_nonzero(platform_candidate)),
+            "connected_component_count": connected_component_count,
+            "largest_component_count": int(np.count_nonzero(platform_fit)),
+            "final_platform_fit_count": int(np.count_nonzero(platform_fit)),
+            "minimum_required": int(현재프레임_최소플랫폼픽셀),
+        })
+        for filename, mask in (
+            ("06_object_excluded.png", object_excluded),
+            ("07_area_eroded.png", area_eroded),
+            ("08_platform_candidate.png", platform_candidate),
+            ("09_largest_component.png", platform_fit),
+            ("10_platform_fit.png", platform_fit),
+        ):
+            현재프레임_마스크저장(diagnostics_dir / filename, mask)
+
+        preview = diagnostics.get("preview")
+        if preview is not None and np.asarray(preview).shape[:2] == platform_fit.shape:
+            overlay = np.asarray(preview).copy()
+            overlay[platform_fit] = (
+                0.35 * overlay[platform_fit]
+                + 0.65 * np.array([0, 255, 0], dtype=np.float64)
+            ).astype(np.uint8)
+            cv2.imwrite(str(diagnostics_dir / "platform_fit_overlay.png"), overlay)
+
+        def retained(current, previous):
+            return 100.0 * current / previous if previous > 0 else 0.0
+
+        print("\nCURRENT-FRAME PLATFORM FIT MASK STAGES")
+        print(
+            f"after object exclusion = {counts['object_excluded_count']:,} "
+            f"({retained(counts['object_excluded_count'], counts['domain_count']):.1f}%)"
+        )
+        print(
+            f"area eroded           = {counts['area_eroded_count']:,} "
+            f"({retained(counts['area_eroded_count'], counts['object_area_count']):.1f}%)"
+        )
+        print(
+            f"platform candidate    = {counts['platform_candidate_count']:,} "
+            f"({retained(counts['platform_candidate_count'], counts['object_excluded_count']):.1f}%)"
+        )
+        print(f"connected components  = {connected_component_count}")
+        print(
+            f"largest component     = {counts['largest_component_count']:,} "
+            f"({retained(counts['largest_component_count'], counts['platform_candidate_count']):.1f}%)"
+        )
+        print(
+            f"final platform fit    = {counts['final_platform_fit_count']:,} "
+            f"({retained(counts['final_platform_fit_count'], counts['largest_component_count']):.1f}%)"
+        )
+        (diagnostics_dir / "platform_mask_diagnostics.json").write_text(
+            json.dumps(counts, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    return platform_fit
 
 
 def 현재프레임_Depth내부홀_위상보강(
@@ -13582,6 +13687,7 @@ def 현재프레임_복원_실행(
     object_area,
     object_valid,
     modulation,
+    preview=None,
 ):
     output_dir = (
         Path(
@@ -13649,11 +13755,64 @@ def 현재프레임_복원_실행(
         )
     )
 
+    diagnostics_dir = output_dir / "diagnostics" / "current_frame_platform"
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    diagnostic_counts = {
+        "object_area_count": int(np.count_nonzero(object_area)),
+        "object_valid_count": int(np.count_nonzero(object_valid)),
+        "domain_count": int(np.count_nonzero(domain)),
+        "depth_object_mask_count": int(np.count_nonzero(depth_object_mask)),
+        "depth_object_seed_count": int(np.count_nonzero(depth_object_seed)),
+        "object_mask_count": int(np.count_nonzero(object_mask)),
+        "platform_all_count": int(np.count_nonzero(platform_all)),
+        "minimum_required": int(현재프레임_최소플랫폼픽셀),
+    }
+    for filename, mask in (
+        ("01_object_area.png", object_area),
+        ("02_domain.png", domain),
+        ("03_depth_object_seed.png", depth_object_seed),
+        ("04_object_mask.png", object_mask),
+        ("05_platform_all.png", platform_all),
+    ):
+        현재프레임_마스크저장(diagnostics_dir / filename, mask)
+
+    def retained(current, previous):
+        return 100.0 * current / previous if previous > 0 else 0.0
+
+    print("\nCURRENT-FRAME PLATFORM MASK DIAGNOSTICS")
+    print(f"object_area_count       = {diagnostic_counts['object_area_count']:,}")
+    print(
+        f"object_valid_count      = {diagnostic_counts['object_valid_count']:,} "
+        f"({retained(diagnostic_counts['object_valid_count'], diagnostic_counts['object_area_count']):.1f}%)"
+    )
+    print(
+        f"domain_count            = {diagnostic_counts['domain_count']:,} "
+        f"({retained(diagnostic_counts['domain_count'], diagnostic_counts['object_valid_count']):.1f}%)"
+    )
+    print(f"depth_object_mask_count = {diagnostic_counts['depth_object_mask_count']:,}")
+    print(
+        f"depth_object_seed_count = {diagnostic_counts['depth_object_seed_count']:,} "
+        f"({retained(diagnostic_counts['depth_object_seed_count'], diagnostic_counts['depth_object_mask_count']):.1f}%)"
+    )
+    print(
+        f"object_mask_count       = {diagnostic_counts['object_mask_count']:,} "
+        f"({retained(diagnostic_counts['object_mask_count'], diagnostic_counts['depth_object_seed_count']):.1f}%)"
+    )
+    print(
+        f"platform_all_count      = {diagnostic_counts['platform_all_count']:,} "
+        f"({retained(diagnostic_counts['platform_all_count'], diagnostic_counts['domain_count']):.1f}%)"
+    )
+
     platform_fit = (
         현재프레임_플랫폼피팅마스크_생성(
             object_mask,
             domain,
             object_area,
+            diagnostics={
+                "directory": diagnostics_dir,
+                "counts": diagnostic_counts,
+                "preview": preview,
+            },
         )
     )
 
@@ -13791,11 +13950,21 @@ def 현재프레임_복원_실행(
         )
     )
 
+    diagnostic_counts["object_mask_count"] = int(np.count_nonzero(object_mask))
+    diagnostic_counts["platform_all_count"] = int(np.count_nonzero(platform_all))
+    현재프레임_마스크저장(diagnostics_dir / "04_object_mask.png", object_mask)
+    현재프레임_마스크저장(diagnostics_dir / "05_platform_all.png", platform_all)
+
     platform_fit = (
         현재프레임_플랫폼피팅마스크_생성(
             object_mask,
             domain,
             object_area,
+            diagnostics={
+                "directory": diagnostics_dir,
+                "counts": diagnostic_counts,
+                "preview": preview,
+            },
         )
     )
 
@@ -14718,6 +14887,7 @@ def 최종통합_후처리_실행(
             object_area=object_area,
             object_valid=object_valid,
             modulation=modulation,
+            preview=preview,
         )
     )
 

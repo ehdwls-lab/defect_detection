@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import cv2
 
-from structured_light_paths import ROOT
+from structured_light_paths import RESULT_ROOT, ROOT
 
 
 # ============================================================
@@ -14,12 +14,7 @@ from structured_light_paths import ROOT
 
 BASE = ROOT
 
-SAMPLE = (
-    BASE
-    / "플랫폼 바닥 따기"
-    / "구조광_전처리"
-    / "샘플"
-)
+SAMPLE = RESULT_ROOT
 
 # 바닥을 얼마나 듬성듬성 표시할지
 # 클수록 바닥 점이 적음

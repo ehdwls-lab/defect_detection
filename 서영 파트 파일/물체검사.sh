@@ -25,7 +25,7 @@ fi
 
 BASE="$ROOT"
 
-SAMPLE_DIR="$BASE/플랫폼 바닥 따기/구조광_전처리/샘플"
+SAMPLE_DIR="${STRUCTURED_LIGHT_RESULT_ROOT:-$BASE/플랫폼 바닥 따기/구조광_전처리/샘플}"
 
 cd "$BASE"
 
@@ -93,8 +93,15 @@ fi
 
 step "1/6 구조광 촬영 및 전처리"
 
+CAPTURE_ARGS=()
+if [ -n "${STRUCTURED_LIGHT_MONITOR:-}" ]; then
+    CAPTURE_ARGS+=(--monitor "$STRUCTURED_LIGHT_MONITOR")
+fi
+CAPTURE_ARGS+=(--out_root "$(dirname -- "$SAMPLE_DIR")" --sample "$(basename -- "$SAMPLE_DIR")")
+
 "$PYTHON" \
-    "$BASE/구조광_전처리_최종_v2_현재프레임플랫폼기준_Depth홀위상보강_경로수정_0822.py"
+    "$BASE/구조광_전처리_최종_v2_현재프레임플랫폼기준_Depth홀위상보강_경로수정_0822.py" \
+    "${CAPTURE_ARGS[@]}"
 
 
 # ==============================================================================
@@ -284,6 +291,13 @@ step "6/6 평면 검출 + 3축 플랫폼 Pose 계산"
 POSE_ARGS=()
 if [ "${STRUCTURED_LIGHT_VISUALIZE:-0}" = "1" ]; then
     POSE_ARGS+=(--visualize)
+fi
+
+DEPTH_NPY="$RUN_DIR/00_Depth자동영역/현재_물체_depth.npy"
+DEPTH_INTRINSICS="$RUN_DIR/00_Depth자동영역/현재_물체_depth_intrinsics.json"
+POSE_ARGS+=(--depth-npy "$DEPTH_NPY" --intrinsics-json "$DEPTH_INTRINSICS")
+if [ -n "${PLATFORM_AXIS_CONTRACT_JSON:-}" ]; then
+    POSE_ARGS+=(--axis-contract-json "$PLATFORM_AXIS_CONTRACT_JSON")
 fi
 
 "$PYTHON" \

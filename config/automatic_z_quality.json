@@ -1,0 +1,27 @@
+{
+  "schema_version": "automatic_z_quality_v1",
+  "profile": "recovered_existing_surface_readiness_values",
+  "depth_min_mm": 80.0,
+  "depth_max_mm": 2000.0,
+  "min_depth_valid_ratio": 0.25,
+  "saturation_value": 250,
+  "dark_value": 20,
+  "score_weights": {},
+  "provenance": {
+    "depth_min_mm": "src/config.py: DepthConfig.min_mm",
+    "depth_max_mm": "src/config.py: DepthConfig.max_mm",
+    "min_depth_valid_ratio": "src/config.py: InspectionQualityConfig.min_depth_valid_ratio",
+    "saturation_value": "src/capture_dataset.py: calculate_metrics overexposed pixel definition",
+    "dark_value": "src/tools/analyze_capture_quality.py: calculate_metrics dark pixel definition"
+  },
+  "unresolved": [
+    "quality score/weights",
+    "Automatic Z RGB saturation ratio gate",
+    "Automatic Z RGB dark ratio gate",
+    "Automatic Z sharpness gate",
+    "Automatic Z contrast gate",
+    "Automatic Z ROI coverage gate",
+    "Automatic Z ROI clipping gate",
+    "Automatic Z invalid depth ratio gate"
+  ]
+}

@@ -12,6 +12,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from src.infer_anomaly import select_patch_positions
+
 try:
     from src.preprocessing import preprocess_anomaly
 except ModuleNotFoundError:
@@ -126,6 +128,30 @@ def calculate_positions(length: int, patch_size: int, stride: int) -> list[int]:
     return list(range(0, length - patch_size + 1, stride))
 
 
+def generate_region_patch_samples(
+    image_shape: tuple[int, ...],
+    regions: Sequence[dict[str, int]],
+    patch_size: int,
+    stride: int,
+) -> list[tuple[int, int, int]]:
+    """Return the exact region-index/x/y contract used by train and validation."""
+    height, width = image_shape[:2]
+    coordinates: set[tuple[int, int]] = set()
+    samples: list[tuple[int, int, int]] = []
+    for region_index, region in enumerate(regions):
+        x1 = max(0, min(width, int(region["x1"])))
+        y1 = max(0, min(height, int(region["y1"])))
+        x2 = max(0, min(width, int(region["x2"])))
+        y2 = max(0, min(height, int(region["y2"])))
+        for top in range(y1, y2 - patch_size + 1, stride):
+            for left in range(x1, x2 - patch_size + 1, stride):
+                if (left, top) in coordinates:
+                    continue
+                coordinates.add((left, top))
+                samples.append((region_index, left, top))
+    return samples
+
+
 class PatchDataset(Dataset[Tensor]):
     """
     이미지를 고정 크기로 변환한 뒤 grid 형태로 Patch를 추출하는 Dataset.
@@ -185,6 +211,7 @@ class PatchDataset(Dataset[Tensor]):
 
         # 각 Patch가 어느 이미지의 어느 좌표인지 저장
         self.samples: list[tuple[Path, int, int, int]] = []
+        self.sample_mask_paths: list[Path | None] = []
 
         for image_index, image_path in enumerate(self.image_paths):
             image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
@@ -192,6 +219,25 @@ class PatchDataset(Dataset[Tensor]):
                 raise RuntimeError(f"이미지를 읽지 못했습니다: {image_path}")
             height, width = image.shape[:2]
             entry = manifest_entries[image_index]
+            mask_value = entry.get("mask", "").strip()
+            if mask_value:
+                mask_path = Path(mask_value)
+                if not mask_path.is_absolute():
+                    mask_path = PROJECT_ROOT / mask_path
+                mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+                if mask is None or mask.shape != (height, width):
+                    raise ValueError(
+                        f"mask가 이미지와 정렬되지 않았습니다: {mask_path}"
+                    )
+                positions = select_patch_positions(
+                    image.shape, patch_size, stride,
+                    surface_mask=mask, min_surface_coverage=1.0,
+                )
+                for sample_index, (left, top) in enumerate(positions):
+                    self.samples.append((image_path, sample_index, left, top))
+                    self.sample_mask_paths.append(mask_path)
+                continue
+
             region_value = entry.get("regions", "").strip()
             if region_value:
                 region_path = Path(region_value)
@@ -208,18 +254,11 @@ class PatchDataset(Dataset[Tensor]):
                     "명시적으로 allow_full_image=True를 사용해야 전체 이미지를 허용합니다."
                 )
 
-            coordinates: set[tuple[int, int]] = set()
-            for region_index, region in enumerate(regions):
-                x1 = max(0, min(width, int(region["x1"])))
-                y1 = max(0, min(height, int(region["y1"])))
-                x2 = max(0, min(width, int(region["x2"])))
-                y2 = max(0, min(height, int(region["y2"])))
-                for top in range(y1, y2 - patch_size + 1, stride):
-                    for left in range(x1, x2 - patch_size + 1, stride):
-                        if (left, top) in coordinates:
-                            continue
-                        coordinates.add((left, top))
-                        self.samples.append((image_path, region_index, left, top))
+            for region_index, left, top in generate_region_patch_samples(
+                image.shape, regions, patch_size, stride,
+            ):
+                self.samples.append((image_path, region_index, left, top))
+                self.sample_mask_paths.append(None)
 
         if not self.samples:
             raise RuntimeError("생성된 Patch가 없습니다. 크기 설정을 확인하세요.")
@@ -229,6 +268,7 @@ class PatchDataset(Dataset[Tensor]):
 
     def __getitem__(self, index: int):
         image_path, region_index, left, top = self.samples[index]
+        mask_path = self.sample_mask_paths[index]
 
         try:
             image_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
@@ -260,4 +300,6 @@ class PatchDataset(Dataset[Tensor]):
             "x": left,
             "y": top,
         }
+        if mask_path is not None:
+            metadata["mask_path"] = str(mask_path)
         return patch_tensor, metadata

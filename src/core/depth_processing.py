@@ -81,6 +81,37 @@ def fit_inverse_depth_plane_ransac(depth_mm: np.ndarray, sample_mask: np.ndarray
     return plane_depth, inlier_ratio, inlier_residual
 
 
+def inverse_depth_plane_normal(plane_depth_mm: np.ndarray) -> np.ndarray | None:
+    """Recover a front-facing camera-coordinate normal from an inverse-depth plane."""
+    plane = np.asarray(plane_depth_mm, dtype=np.float64)
+    valid = np.isfinite(plane) & (plane > 0)
+    ys, xs = np.where(valid)
+    if len(xs) < 3:
+        return None
+    h, w = plane.shape
+    xn = xs / max(1.0, w - 1.0) * 2.0 - 1.0
+    yn = ys / max(1.0, h - 1.0) * 2.0 - 1.0
+    coeff, *_ = np.linalg.lstsq(
+        np.column_stack((xn, yn, np.ones_like(xn))), 1.0 / plane[ys, xs], rcond=None,
+    )
+    normal = np.asarray(coeff, dtype=np.float64)
+    if normal[2] > 0:
+        normal = -normal
+    norm = np.linalg.norm(normal)
+    return normal / norm if norm > 1e-12 else None
+
+
+def normal_angle_error_deg(first: np.ndarray, second: np.ndarray) -> float:
+    """Return the unoriented-safe angle between two normalized plane normals."""
+    a = np.asarray(first, dtype=np.float64)
+    b = np.asarray(second, dtype=np.float64)
+    denominator = np.linalg.norm(a) * np.linalg.norm(b)
+    if denominator <= 1e-12:
+        return float("inf")
+    cosine = float(np.clip(np.dot(a, b) / denominator, -1.0, 1.0))
+    return float(np.degrees(np.arccos(cosine)))
+
+
 def depth_object_candidate(depth_mm: np.ndarray, plane_depth_mm: np.ndarray, workspace_mask: np.ndarray, config) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Generate the geometry-based candidate object mask from plane-relative height."""
     depth_min_mm = float(getattr(config, "depth_min_mm", getattr(config, "min_mm", 80.0)))
@@ -110,8 +141,10 @@ def depth_object_candidate(depth_mm: np.ndarray, plane_depth_mm: np.ndarray, wor
     return mask, height, valid
 
 
-def select_final_object_mask(candidate: np.ndarray, workspace_mask: np.ndarray, config) -> np.ndarray | None:
-    """Keep the largest central object component and discard background/board-like structures."""
+def select_main_object_component(
+    candidate: np.ndarray, workspace_mask: np.ndarray, config,
+) -> np.ndarray | None:
+    """Select the prototype's guarded main component before contour filling."""
     min_object_area = int(getattr(config, "min_object_area", 10000))
     max_object_area_ratio = float(getattr(config, "max_object_area_ratio", 0.75))
 
@@ -145,11 +178,88 @@ def select_final_object_mask(candidate: np.ndarray, workspace_mask: np.ndarray, 
     candidates.sort(reverse=True)
     label = candidates[0][1]
     component = np.where(labels == label, 255, 0).astype(np.uint8)
+    return component
+
+
+def close_object_component(
+    component: np.ndarray, workspace_mask: np.ndarray, config,
+) -> np.ndarray:
+    """Close only small silhouette gaps and keep the result inside workspace."""
+    component = np.where(np.asarray(component) > 0, 255, 0).astype(np.uint8)
+    workspace = np.where(np.asarray(workspace_mask) > 0, 255, 0).astype(np.uint8)
+    size = odd(getattr(config, "inspection_close_size_px", 9))
+    iterations = max(0, int(getattr(config, "inspection_close_iterations", 1)))
+    if iterations:
+        component = cv2.morphologyEx(
+            component, cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)),
+            iterations=iterations,
+        )
+    return cv2.bitwise_and(component, workspace)
+
+
+def guarded_convex_hull(
+    component: np.ndarray, workspace_mask: np.ndarray, config,
+) -> tuple[np.ndarray | None, int, float, bool]:
+    """Return a hull only when its expansion and frame coverage are bounded."""
+    component = np.where(np.asarray(component) > 0, 255, 0).astype(np.uint8)
+    workspace = np.where(np.asarray(workspace_mask) > 0, 255, 0).astype(np.uint8)
+    area = int(np.count_nonzero(component))
+    if area == 0:
+        return None, 0, float("inf"), False
     contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None, 0, float("inf"), False
+    points = np.concatenate(contours, axis=0)
+    hull = cv2.convexHull(points)
+    hull_mask = np.zeros_like(component)
+    cv2.fillConvexPoly(hull_mask, hull, 255)
+    hull_mask = cv2.bitwise_and(hull_mask, workspace)
+    hull_area = int(np.count_nonzero(hull_mask))
+    expansion = float(hull_area / area)
+    workspace_area = max(1, int(np.count_nonzero(workspace)))
+    h, w = component.shape
+    edge_margin = max(0, int(getattr(config, "fov_edge_margin_px", 18)))
+    touches_edge = (
+        np.any(hull_mask[:edge_margin + 1] > 0)
+        or np.any(hull_mask[-edge_margin - 1:] > 0)
+        or np.any(hull_mask[:, :edge_margin + 1] > 0)
+        or np.any(hull_mask[:, -edge_margin - 1:] > 0)
+    )
+    accepted = (
+        expansion <= float(getattr(config, "hull_max_expansion_ratio", 1.5))
+        and hull_area / workspace_area <= float(
+            getattr(config, "hull_max_frame_area_ratio", 0.75)
+        )
+        and not touches_edge
+        and hull_area < h * w
+    )
+    return (hull_mask if accepted else None), hull_area, expansion, accepted
+
+
+def fill_external_object_contour(
+    component: np.ndarray, workspace_mask: np.ndarray,
+) -> np.ndarray | None:
+    """Fill only the selected component's external contour, clipped to workspace."""
+    component = np.where(np.asarray(component) > 0, 255, 0).astype(np.uint8)
+    workspace = np.where(np.asarray(workspace_mask) > 0, 255, 0).astype(np.uint8)
+    if component.ndim != 2 or component.shape != workspace.shape:
+        raise ValueError("component and workspace masks must be aligned 2D arrays")
+    contours, _ = cv2.findContours(
+        component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+    )
     if not contours:
         return None
 
     contour = max(contours, key=cv2.contourArea)
     final_mask = np.zeros_like(component)
     cv2.drawContours(final_mask, [contour], -1, 255, cv2.FILLED)
-    return final_mask
+    return cv2.bitwise_and(final_mask, workspace)
+
+
+def select_final_object_mask(candidate: np.ndarray, workspace_mask: np.ndarray, config) -> np.ndarray | None:
+    """Keep the guarded main component and fill its external contour."""
+    component = select_main_object_component(candidate, workspace_mask, config)
+    if component is None:
+        return None
+    return fill_external_object_contour(component, workspace_mask)

@@ -415,13 +415,9 @@ def wait_for_aligned_pair(
         )
 
         if depth.shape[:2] != color.shape[:2]:
-            depth = cv2.resize(
-                depth,
-                (
-                    color.shape[1],
-                    color.shape[0],
-                ),
-                interpolation=cv2.INTER_NEAREST,
+            raise RuntimeError(
+                "Orbbec D2C alignment returned mismatched RGB/depth shapes: "
+                f"RGB={color.shape[:2]}, Depth={depth.shape[:2]}"
             )
 
         return color, depth
@@ -2349,4 +2345,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

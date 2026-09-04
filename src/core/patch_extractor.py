@@ -49,3 +49,24 @@ def extract_valid_surface_patches(
         y = int(patch["y"])
         patch_images.append(image[y:y + patch_size, x:x + patch_size].copy())
     return patches, patch_images
+
+
+def patch_union_mask(
+    image_shape: tuple[int, ...], patches: list[dict[str, int | float]],
+) -> np.ndarray:
+    """Return the union of accepted patch rectangles on the image grid."""
+    union = np.zeros(tuple(image_shape[:2]), dtype=np.uint8)
+    for patch in patches:
+        x, y = int(patch["x"]), int(patch["y"])
+        width, height = int(patch["w"]), int(patch["h"])
+        union[y:y + height, x:x + width] = 255
+    return union
+
+
+def measure_patchability(
+    inspection_mask: np.ndarray, patch_size: int, stride: int, coverage: float,
+) -> tuple[list[dict[str, int | float]], np.ndarray, float]:
+    patches = generate_surface_patches(inspection_mask, patch_size, stride, coverage)
+    union = patch_union_mask(inspection_mask.shape, patches)
+    area = int(np.count_nonzero(inspection_mask))
+    return patches, union, float(np.count_nonzero(union) / area) if area else 0.0
