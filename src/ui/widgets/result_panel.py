@@ -25,4 +25,3 @@ class ResultPanel(QFrame):
         self.primary.setText(primary if visible else "INSPECTION IN PROGRESS")
         self.secondary.setText(secondary if visible else "ACTIVE VISION SEQUENCE")
         self.setStyleSheet(f"#resultPanel {{ border:2px solid {color}; background:#101820; }} #resultPrimary {{ color:{color}; }}")
-

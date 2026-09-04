@@ -26,4 +26,3 @@ class InspectionUIEvent:
     type: InspectionUIEventType
     elapsed_s: float
     payload: dict[str, Any] = field(default_factory=dict)
-

@@ -33,4 +33,3 @@ class ReplayCursor:
         while self.index + 1 < len(self.events) and self.events[self.index + 1].elapsed_s <= elapsed_s:
             self.index += 1
         return self.events[start:self.index + 1]
-

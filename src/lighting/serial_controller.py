@@ -22,7 +22,7 @@ class LightingTimeoutError(LightingError):
 @dataclass(frozen=True)
 class SerialLightingConfig:
     port: str
-    baudrate: int = 115200 
+    baudrate: int = 115200
     startup_timeout_sec: float = 5.0
     command_timeout_sec: float = 2.0
     projector_cover_open_angle_deg: int | None = None
